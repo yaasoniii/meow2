@@ -18,14 +18,35 @@ type OrderStatusUpdatedEvent record {|
 |};
 
 // ---------- Event payloads consumed from other services ----------
-// NOTE: payments.completed is owned by the Payment Service. Field names below
-// are an assumption - confirm the exact schema with whoever implements that
-// service and adjust this type (and consumer.bal) if it differs. It's
-// declared as an open record so extra fields they add don't break us.
+// All open records (`record { }`), so extra fields the owning service adds
+// later flow through instead of failing to deserialise.
+
+// payments.completed - owned by the Payment Service. Agreed status values are
+// "SUCCESS" and "FAILED" (see the Kafka contract in the root README).
 type PaymentCompletedEvent record {
     string orderId;
     string status;
+    string paymentId?;
+    string customerId?;
     decimal amount?;
-    string currency?;
+    string timestamp?;
+};
+
+// restaurant.status - owned by the Restaurant Service. "ACKNOWLEDGED" means the
+// restaurant has accepted the order, which is what confirms it.
+type RestaurantStatusEvent record {
+    string orderId;
+    string status;
+    string restaurantId?;
+    string timestamp?;
+};
+
+// delivery.status_updated - owned by the Delivery Service, published on every
+// delivery transition. PICKED_UP and DELIVERED drive the order's last two steps.
+type DeliveryStatusUpdatedEvent record {
+    string orderId;
+    string newStatus;
+    string deliveryId?;
+    string previousStatus?;
     string timestamp?;
 };

@@ -4,7 +4,9 @@ servicePort = 8081
 [dsa612s.order_service.messaging]
 kafkaBootstrapServers = "kafka:9092"
 paymentsCompletedTopic = "payments.completed"
-paymentConsumerGroupId = "order-service-payment-consumer"
+restaurantStatusTopic = "restaurant.status"
+deliveryStatusUpdatedTopic = "delivery.status_updated"
+eventConsumerGroupId = "order-service-event-consumer"
 
 [dsa612s.order_service.store]
 # MongoDB connection. Override mongoUsername/mongoPassword via a Config.toml

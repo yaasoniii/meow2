@@ -9,9 +9,11 @@ CREATED -> CONFIRMED -> PREPARING -> READY -> OUT_FOR_DELIVERY -> DELIVERED
    \-> CANCELLED (from CREATED, CONFIRMED, or PREPARING)
 ```
 
-`PREPARING` is also reached automatically when a `payments.completed` event
-confirms payment for an order that's currently `CONFIRMED` (see below) — a
-client can still drive the same transition manually via the status endpoint.
+Most steps happen automatically from Kafka events (see *Topics consumed*):
+the restaurant's ACK confirms the order, a successful payment starts
+preparation, and the driver's pickup and delivery finish it. The restaurant
+marks the order `READY` through the REST API. Every transition can still be
+driven manually via the status endpoint.
 
 ## Layout
 
@@ -37,7 +39,8 @@ modules/messaging/          Everything Kafka.
   types.bal                  Event payload shapes (orders.created, orders.status_updated,
                               payments.completed).
   producer.bal                Publishes orders.created / orders.status_updated.
-  consumer.bal                Consumes payments.completed -> auto CONFIRMED -> PREPARING.
+  consumer.bal                Consumes restaurant.status / payments.completed / delivery.status_updated
+                              and auto-advances the order.
 
 tests/                        Integration tests: exercise the real running HTTP service
                                against real Mongo/Kafka (see Testing below).
@@ -53,9 +56,10 @@ only on `lifecycle`; `lifecycle` depends on nothing in this project.
 | Method | Path                     | Description                          |
 |--------|--------------------------|---------------------------------------|
 | POST   | /orders                  | Create an order (status = CREATED)   |
-| GET    | /orders                  | List all orders                       |
+| GET    | /orders                  | List orders, newest first (`?customerId=`, `?restaurantId=`, `?status=`) |
 | GET    | /orders/{orderId}        | Fetch one order                       |
 | PUT    | /orders/{orderId}/status | Advance the order's status            |
+| GET    | /health                  | `{status, consumedTopics}`            |
 
 ## Persistence: MongoDB
 
@@ -71,6 +75,7 @@ one document with its items embedded (no join needed to read an order):
   "items": [{"itemId": "string", "name": "string", "quantity": 0, "unitPrice": 0.0}],
   "totalAmount": 0.0,
   "status": "CREATED|CONFIRMED|PREPARING|READY|OUT_FOR_DELIVERY|DELIVERED|CANCELLED",
+  "paymentStatus": "SUCCESS|FAILED",  // optional - set from payments.completed
   "createdAt": "ISO-8601 string",
   "updatedAt": "ISO-8601 string"
 }
@@ -107,26 +112,21 @@ Produced on every valid status transition (manual or auto-advanced).
   "timestamp": "ISO-8601 string"
 }
 ```
-Consumers: Customer Service, Notification Service, Admin Service.
+Consumers: Customer Service, Delivery Service, Notification Service, Admin Service.
 
 **Partition key:** `orderId` for both topics, so all events for one order stay ordered on the same partition.
 
-### Topic consumed: `payments.completed`
-Owned by the Payment Service, not us. `modules/messaging/consumer.bal` currently assumes:
-```json
-{"orderId": "string", "status": "COMPLETED", "amount": 0.0, "currency": "string", "timestamp": "ISO-8601 string"}
-```
-**This is a guess** — confirm the real field names (`status` vs `paymentStatus`,
-`"COMPLETED"` vs `"SUCCESS"`, etc.) with whoever owns the Payment Service and
-update `PaymentCompletedEvent` in `modules/messaging/types.bal` and the check
-in `consumer.bal` accordingly. Only `orderId` and a completed/failed status
-are required for the auto-transition to work.
+### Topics consumed
 
-When a `payments.completed` event with status `COMPLETED` arrives for an
-order that is currently `CONFIRMED`, the order is atomically moved to
-`PREPARING` and `orders.status_updated` is published. Events for orders in
-any other state, or for unknown order IDs, are logged and skipped (this
-makes the handler idempotent against redelivery and out-of-order events).
+All three are handled by one listener in `modules/messaging/consumer.bal`, one record at a time:
+
+| Topic | Event | Effect |
+|-------|-------|--------|
+| `restaurant.status` | `{orderId, status: "ACKNOWLEDGED"}` | `CREATED -> CONFIRMED`, then straight on to `PREPARING` if payment already succeeded |
+| `payments.completed` | `{orderId, paymentId, customerId, amount, status: "SUCCESS" \| "FAILED"}` | stores `paymentStatus` on the order; on `SUCCESS` a `CONFIRMED` order moves to `PREPARING` |
+| `delivery.status_updated` | `{orderId, newStatus: "PICKED_UP" \| "DELIVERED", ...}` | `READY -> OUT_FOR_DELIVERY`, then `-> DELIVERED` |
+
+The restaurant ACK and the payment result can arrive in either order. Whichever arrives second moves the order to `PREPARING`. Every automatic move uses the same optimistic `applyStatusTransition` as the REST API and publishes `orders.status_updated`. Events for unknown orders, or for orders already past that step, are logged and skipped, which makes the handler idempotent against redelivery.
 
 ## Running locally
 
@@ -175,8 +175,6 @@ those.
   them, the DB and the event stream disagree (the write succeeds, the event
   never goes out). A transactional outbox would fix this properly; out of
   scope here, but worth a sentence in the report if asked about reliability.
-- **`payments.completed` schema is assumed**, not confirmed with the Payment
-  Service owner (see above).
 - **No auth/authz** on the REST API or between services — fine for a course
   assignment, but flag it if the report asks about production-readiness.
 - **Mongo credentials** default to empty (no auth) for local Compose use;

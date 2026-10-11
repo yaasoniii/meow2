@@ -26,6 +26,10 @@ public type Order record {|
     OrderItem[] items;
     decimal totalAmount;
     OrderStatus status;
+    // Last payments.completed outcome for this order ("SUCCESS" / "FAILED").
+    // Absent until the Payment Service has reported - optional so orders saved
+    // before this field existed still deserialise.
+    string paymentStatus?;
     string createdAt;
     string updatedAt;
 |};

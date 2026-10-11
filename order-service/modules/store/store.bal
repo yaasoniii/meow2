@@ -46,12 +46,25 @@ public isolated function findOrderById(string orderId) returns lifecycle:Order?|
     return check orderCollection->findOne({orderId: orderId});
 }
 
-public isolated function findAllOrders() returns lifecycle:Order[]|error {
-    stream<lifecycle:Order, error?> resultStream = check orderCollection->find({});
+// Newest first. `filter` is a plain Mongo filter, e.g. {customerId: "..."}.
+public isolated function findOrders(map<json> filter) returns lifecycle:Order[]|error {
+    stream<lifecycle:Order, error?> resultStream = check orderCollection->find(filter, {sort: {createdAt: -1}});
     lifecycle:Order[] orders = check from lifecycle:Order o in resultStream
         select o;
     check resultStream.close();
     return orders;
+}
+
+// Records the latest payment outcome without touching the lifecycle status -
+// whether the order can advance is decided by the caller.
+public isolated function setPaymentStatus(string orderId, string paymentStatus, string updatedAt) returns error? {
+    mongodb:UpdateResult result = check orderCollection->updateOne(
+        {orderId: orderId},
+        {set: {paymentStatus: paymentStatus, updatedAt: updatedAt}}
+    );
+    if result.matchedCount == 0 {
+        return error(string `Order ${orderId} not found`);
+    }
 }
 
 // Applies a status transition atomically: the filter includes the expected
