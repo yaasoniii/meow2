@@ -1,0 +1,3 @@
+[dsa612s.admin_service]
+kafkaBootstrapServers = "localhost:29092"
+mongoHost = "localhost"

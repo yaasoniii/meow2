@@ -1,0 +1,6 @@
+kafkaBootstrap = "kafka:9092"
+dbHost = "payment-db"
+dbPort = 5432
+dbName = "payments"
+dbUser = "payment_user"
+dbPassword = "payment_pass"

@@ -1,0 +1,6 @@
+# Used inside Docker Compose, where Kafka and MongoDB are reached by service name.
+[dsa612s.admin_service]
+servicePort = 8087
+kafkaBootstrapServers = "kafka:9092"
+mongoHost = "mongo"
+mongoPort = 27017

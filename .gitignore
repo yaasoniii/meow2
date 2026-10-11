@@ -1,0 +1,18 @@
+# Ballerina build output / generated code
+target/
+generated/
+.ballerina/
+*.balx
+*.balo
+*.bala
+*.jar
+*.class
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

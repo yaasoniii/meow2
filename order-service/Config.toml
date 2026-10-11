@@ -1,0 +1,17 @@
+[dsa612s.order_service]
+servicePort = 8081
+
+[dsa612s.order_service.messaging]
+kafkaBootstrapServers = "kafka:9092"
+paymentsCompletedTopic = "payments.completed"
+paymentConsumerGroupId = "order-service-payment-consumer"
+
+[dsa612s.order_service.store]
+# MongoDB connection. Override mongoUsername/mongoPassword via a Config.toml
+# that is NOT committed (or via `-Ckey=value` / secrets) for real deployments.
+mongoHost = "mongo"
+mongoPort = 27017
+mongoDatabase = "order_service"
+mongoUsername = ""
+mongoPassword = ""
+mongoAuthDatabase = "admin"

@@ -1,0 +1,18 @@
+[dsa612s.restaurant_service]
+servicePort = 8083
+
+[dsa612s.restaurant_service.messaging]
+kafkaBootstrapServers = "kafka:9092"
+ordersCreatedTopic = "orders.created"
+restaurantStatusTopic = "restaurant.status"
+orderConsumerGroupId = "restaurant-service-order-consumer"
+
+[dsa612s.restaurant_service.store]
+# MongoDB connection. Override mongoUsername/mongoPassword via a Config.toml
+# that is NOT committed (or via `-Ckey=value` / secrets) for real deployments.
+mongoHost = "mongo"
+mongoPort = 27017
+mongoDatabase = "restaurant_service"
+mongoUsername = ""
+mongoPassword = ""
+mongoAuthDatabase = "admin"

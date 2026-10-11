@@ -1,0 +1,13 @@
+[package]
+org = "dsa_group2"
+name = "payment_service"
+version = "1.0.0"
+distribution = "2201.9.0"
+
+[build-options]
+observabilityIncluded = true
+
+[[dependency]]
+org = "ballerinax"
+name = "postgresql.driver"
+version = "1.13.0"
