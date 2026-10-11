@@ -1,0 +1,12 @@
+[dsa612s.notification_service]
+servicePort = 8086
+
+[dsa612s.notification_service.messaging]
+kafkaBootstrapServers = "kafka:9092"
+ordersCreatedTopic = "orders.created"
+ordersStatusUpdatedTopic = "orders.status_updated"
+paymentsCompletedTopic = "payments.completed"
+restaurantStatusTopic = "restaurant.status"
+deliveryAssignedTopic = "delivery.assigned"
+deliveryCompletedTopic = "delivery.completed"
+notificationConsumerGroupId = "notification-service-consumer"

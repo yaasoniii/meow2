@@ -1,3 +1,6 @@
+// ---------- Event payloads consumed from Kafka ----------
+// Open records: fields a producing service adds later are ignored, not fatal.
+
 // Event received when a new order is created.
 public type OrderCreatedEvent record {
     string orderId;
@@ -23,10 +26,20 @@ public type OrderStatusUpdatedEvent record {
     string timestamp;
 };
 
-// Event received when payment processing is completed.
+// Event received when payment processing is completed ("SUCCESS" / "FAILED").
 public type PaymentCompletedEvent record {
     string orderId;
     string paymentId;
+    string status;
+    string timestamp;
+    string customerId?;
+    decimal amount?;
+};
+
+// Event received when the restaurant reacts to an order (e.g. "ACKNOWLEDGED").
+public type RestaurantStatusEvent record {
+    string orderId;
+    string restaurantId;
     string status;
     string timestamp;
 };
@@ -46,3 +59,17 @@ public type DeliveryCompletedEvent record {
     string driverId;
     string timestamp;
 };
+
+// ---------- What this service produces ----------
+
+// One human-readable notification. customerId is filled in from the order's
+// orders.created event, since most other events only carry the orderId.
+public type Notification record {|
+    string notificationId;
+    string topic;
+    string orderId;
+    string? customerId;
+    string title;
+    string message;
+    string timestamp;
+|};

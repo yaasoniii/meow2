@@ -1,0 +1,4 @@
+target/
+generated/
+.ballerina/
+*.jar
