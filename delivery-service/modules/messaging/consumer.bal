@@ -6,41 +6,57 @@ import dsa612s/delivery_service.domain;
 import dsa612s/delivery_service.store;
 
 configurable string paymentsCompletedTopic = "payments.completed";
-configurable string paymentConsumerGroupId = "delivery-service-payment-consumer";
+configurable string ordersStatusUpdatedTopic = "orders.status_updated";
+configurable string eventConsumerGroupId = "delivery-service-consumer";
 
-listener kafka:Listener paymentListener = new (kafkaBootstrapServers, {
-    groupId: paymentConsumerGroupId,
-    topics: [paymentsCompletedTopic],
+const string PAYMENT_SUCCESS = "SUCCESS";
+const string ORDER_CANCELLED = "CANCELLED";
+
+listener kafka:Listener eventListener = new (kafkaBootstrapServers, {
+    groupId: eventConsumerGroupId,
+    topics: [paymentsCompletedTopic, ordersStatusUpdatedTopic],
     offsetReset: kafka:OFFSET_RESET_EARLIEST,
     autoCommit: false
 });
 
-service on paymentListener {
+service on eventListener {
 
     remote function onConsumerRecord(kafka:Caller caller, kafka:BytesConsumerRecord[] records) returns error? {
         foreach kafka:BytesConsumerRecord kafkaRecord in records {
-            error? result = handlePaymentCompleted(kafkaRecord);
+            error? result = handleRecord(kafkaRecord);
             if result is error {
-                // Log and continue
-                log:printError("Failed to process payments.completed record", result);
+                // Log and continue: one bad record shouldn't block the rest of the batch.
+                log:printError("Failed to process event", result, topic = kafkaRecord.offset.partition.topic);
             }
         }
         // Commit only after the whole batch has been handled.
         kafka:Error? commitResult = caller->commit();
         if commitResult is kafka:Error {
-            log:printError("Failed to commit payments.completed offsets", commitResult);
+            log:printError("Failed to commit offsets", commitResult);
         }
     }
 }
 
-isolated function handlePaymentCompleted(kafka:BytesConsumerRecord kafkaRecord) returns error? {
+isolated function handleRecord(kafka:BytesConsumerRecord kafkaRecord) returns error? {
+    string topic = kafkaRecord.offset.partition.topic;
     string payload = check string:fromBytes(kafkaRecord.value);
+    if topic == paymentsCompletedTopic {
+        return handlePaymentCompleted(payload);
+    }
+    if topic == ordersStatusUpdatedTopic {
+        return handleOrderStatusUpdated(payload);
+    }
+    log:printWarn("Ignoring event from an unexpected topic", topic = topic);
+}
+
+// A paid order gets a delivery, and a driver straight away if one is free.
+isolated function handlePaymentCompleted(string payload) returns error? {
     PaymentCompletedEvent event = check payload.fromJsonStringWithType(PaymentCompletedEvent);
 
-    if event.status != "SUCCESS" {
-    log:printInfo("Ignoring non-successful payment", orderId = event.orderId, status = event.status);
-    return;
-}
+    if event.status != PAYMENT_SUCCESS {
+        log:printInfo("Ignoring non-successful payment", orderId = event.orderId, status = event.status);
+        return;
+    }
 
     domain:Delivery? existing = check store:findDeliveryByOrderId(event.orderId);
     if existing is domain:Delivery {
@@ -48,28 +64,36 @@ isolated function handlePaymentCompleted(kafka:BytesConsumerRecord kafkaRecord) 
         return;
     }
 
-    string now = time:utcToString(time:utcNow());
-    string deliveryId = uuid:createType1AsString();
-
     domain:Delivery newDelivery = {
-        deliveryId: deliveryId,
+        deliveryId: uuid:createType1AsString(),
         orderId: event.orderId,
         status: domain:PENDING,
-        createdAt: now
+        createdAt: time:utcToString(time:utcNow())
     };
     check store:saveDelivery(newDelivery);
-    log:printInfo("Created delivery for paid order", orderId = event.orderId, deliveryId = deliveryId);
+    log:printInfo("Created delivery for paid order", orderId = event.orderId, deliveryId = newDelivery.deliveryId);
 
-    // Try to assign a driver right away.
-    domain:Driver[] available = check store:fetchAvailableDrivers();
-    domain:Driver? picked = domain:selectAvailableDriver(available);
-    if picked is () {
-        log:printWarn("No driver available; delivery stays PENDING", deliveryId = deliveryId);
+    if !check tryAssignDriver(newDelivery) {
+        log:printWarn("No driver available; delivery stays PENDING", deliveryId = newDelivery.deliveryId);
+    }
+}
+
+// A cancelled order cancels its delivery if no driver has picked it up yet.
+isolated function handleOrderStatusUpdated(string payload) returns error? {
+    OrderStatusUpdatedEvent event = check payload.fromJsonStringWithType(OrderStatusUpdatedEvent);
+    if event.newStatus != ORDER_CANCELLED {
         return;
     }
 
-    check store:applyDeliveryStatusTransition(deliveryId, domain:PENDING, domain:ASSIGNED, now, picked.driverId);
-    check store:updateDriverStatus(picked.driverId, domain:ON_DELIVERY, deliveryId);
-    check publishDeliveryAssigned(deliveryId, event.orderId, picked.driverId);
-    log:printInfo("Assigned driver", deliveryId = deliveryId, driverId = picked.driverId);
+    domain:Delivery? existing = check store:findDeliveryByOrderId(event.orderId);
+    if existing is () || !domain:isValidDeliveryStatusTransition(existing.status, domain:CANCELLED) {
+        return;
+    }
+    _ = check transitionDelivery(existing, domain:CANCELLED);
+    log:printInfo("Cancelled delivery for cancelled order", orderId = event.orderId);
+}
+
+// For GET /health, and so service.bal imports this module (which is what starts the listener).
+public isolated function consumedTopics() returns string[] {
+    return [paymentsCompletedTopic, ordersStatusUpdatedTopic];
 }

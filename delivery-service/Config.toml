@@ -1,2 +1,21 @@
 [dsa612s.delivery_service]
 servicePort = 8085
+
+[dsa612s.delivery_service.messaging]
+kafkaBootstrapServers = "kafka:9092"
+paymentsCompletedTopic = "payments.completed"
+ordersStatusUpdatedTopic = "orders.status_updated"
+deliveryAssignedTopic = "delivery.assigned"
+deliveryCompletedTopic = "delivery.completed"
+deliveryStatusUpdatedTopic = "delivery.status_updated"
+eventConsumerGroupId = "delivery-service-consumer"
+
+[dsa612s.delivery_service.store]
+# MongoDB connection. Override mongoUsername/mongoPassword via a Config.toml
+# that is NOT committed (or via `-Ckey=value` / secrets) for real deployments.
+mongoHost = "mongo"
+mongoPort = 27017
+mongoDatabase = "delivery_service"
+mongoUsername = ""
+mongoPassword = ""
+mongoAuthDatabase = "admin"
