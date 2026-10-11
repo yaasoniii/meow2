@@ -1,5 +1,5 @@
 -- Payment Service schema
--- Swap the in-memory map in main.bal for ballerinax/postgresql against this table.
+-- Run automatically by docker-compose (mounted into /docker-entrypoint-initdb.d on first start).
 
 CREATE TABLE IF NOT EXISTS payments (
     payment_id  UUID PRIMARY KEY,
