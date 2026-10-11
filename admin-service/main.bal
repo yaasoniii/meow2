@@ -27,8 +27,9 @@ function init() returns error? {
     check reportsCollection->createIndex({reportId: 1}, {unique: true, name: "uniq_report_id"});
 }
 
+// Newest first.
 function loadOrders() returns OrderRecord[]|error {
-    stream<OrderRecord, error?> result = check ordersCollection->find({});
+    stream<OrderRecord, error?> result = check ordersCollection->find({}, {sort: {createdAt: -1}});
     OrderRecord[] orders = check from OrderRecord o in result select o;
     check result.close();
     return orders;
@@ -47,6 +48,7 @@ function findReport(string reportId) returns Report?|error {
 
 type OrderCreated record {
     string orderId;
+    string customerId;
     string restaurantId;
     decimal totalAmount;
     string timestamp;
@@ -58,14 +60,27 @@ type OrderStatusUpdated record {
     string timestamp;
 };
 
+type PaymentCompleted record {
+    string orderId;
+    string status;
+};
+
+type DeliveryAssigned record {
+    string orderId;
+    string driverId;
+};
+
 type DeliveryCompleted record {
     string orderId;
     string timestamp;
 };
 
+final string[] & readonly consumedTopics =
+    ["orders.created", "orders.status_updated", "payments.completed", "delivery.assigned", "delivery.completed"];
+
 listener kafka:Listener eventListener = new (kafkaBootstrapServers, {
     groupId: "admin-service",
-    topics: ["orders.created", "orders.status_updated", "delivery.completed"],
+    topics: consumedTopics,
     offsetReset: kafka:OFFSET_RESET_EARLIEST,
     autoCommit: false
 });
@@ -88,20 +103,38 @@ function saveEvent(kafka:BytesConsumerRecord kafkaRecord) returns error? {
     string orderId;
     map<json> fields;
 
+    // Fields only written when the document is first created. Topics aren't
+    // ordered relative to each other, so a status update can arrive before
+    // orders.created - in that case its status must not be reset to CREATED.
+    map<json> insertOnly = {};
+
     if topic == "orders.created" {
         OrderCreated event = check payload.fromJsonStringWithType(OrderCreated);
         orderId = event.orderId;
-        fields = {restaurantId: event.restaurantId, totalAmount: event.totalAmount, createdAt: event.timestamp};
+        fields = {
+            restaurantId: event.restaurantId,
+            customerId: event.customerId,
+            totalAmount: event.totalAmount,
+            createdAt: event.timestamp
+        };
+        insertOnly = {status: "CREATED"};
     } else if topic == "orders.status_updated" {
         OrderStatusUpdated event = check payload.fromJsonStringWithType(OrderStatusUpdated);
         orderId = event.orderId;
+        fields = {status: event.newStatus, updatedAt: event.timestamp};
         if event.newStatus == "DELIVERED" {
-            fields = {deliveredAt: event.timestamp};
+            fields["deliveredAt"] = event.timestamp;
         } else if event.newStatus == "CANCELLED" {
-            fields = {cancelledAt: event.timestamp};
-        } else {
-            return; 
+            fields["cancelledAt"] = event.timestamp;
         }
+    } else if topic == "payments.completed" {
+        PaymentCompleted event = check payload.fromJsonStringWithType(PaymentCompleted);
+        orderId = event.orderId;
+        fields = {paymentStatus: event.status};
+    } else if topic == "delivery.assigned" {
+        DeliveryAssigned event = check payload.fromJsonStringWithType(DeliveryAssigned);
+        orderId = event.orderId;
+        fields = {driverId: event.driverId};
     } else {
         DeliveryCompleted event = check payload.fromJsonStringWithType(DeliveryCompleted);
         orderId = event.orderId;
@@ -109,11 +142,36 @@ function saveEvent(kafka:BytesConsumerRecord kafkaRecord) returns error? {
     }
 
     fields["orderId"] = orderId;
-    _ = check ordersCollection->updateOne({orderId: orderId}, {set: fields}, {upsert: true});
+    mongodb:Update update = insertOnly.length() > 0 ? {set: fields, setOnInsert: insertOnly} : {set: fields};
+    _ = check ordersCollection->updateOne({orderId: orderId}, update, {upsert: true});
     log:printInfo("Recorded event", topic = topic, orderId = orderId);
 }
 
 service /admin on new http:Listener(servicePort) {
+
+    resource function get health() returns json {
+        return {status: "UP", consumedTopics: consumedTopics};
+    }
+
+    // Every order the platform has seen, newest first, as assembled from events.
+    resource function get orders() returns OrderRecord[]|http:InternalServerError {
+        OrderRecord[]|error orders = loadOrders();
+        if orders is error {
+            log:printError("Could not load orders", orders);
+            return <http:InternalServerError>{body: {message: "Could not load order data"}};
+        }
+        return orders;
+    }
+
+    // Live platform totals, computed on request (reports are saved snapshots).
+    resource function get stats() returns PlatformStats|http:InternalServerError {
+        OrderRecord[]|error orders = loadOrders();
+        if orders is error {
+            log:printError("Could not load orders", orders);
+            return <http:InternalServerError>{body: {message: "Could not load order data"}};
+        }
+        return buildStats(orders);
+    }
 
     resource function post reports() returns Report|http:InternalServerError {
         OrderRecord[]|error orders = loadOrders();
