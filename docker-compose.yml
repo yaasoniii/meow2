@@ -29,6 +29,23 @@ services:
       retries: 10
       start_period: 30s
 
+  # One-shot: creates every topic in the shared contract (root README) before
+  # any service subscribes, so no consumer starts against a missing topic.
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for topic in orders.created orders.status_updated payments.completed restaurant.status \
+                     delivery.assigned delivery.completed delivery.status_updated; do
+          kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$$topic" --partitions 3 --replication-factor 1 || exit 1
+        done
+        echo "Kafka topics ready"
+
   mongo:
     image: mongo:7
     ports:
@@ -42,35 +59,6 @@ services:
       retries: 10
       start_period: 15s
 
-  order-service:
-    build: ./order-service
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-
-  customer-service:
-    build: ./customer-service
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    ports:
-      - "8082:8082"
-  restaurant-service:
-    build: ./restaurant-service
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    ports:
-      - "8083:8083"
-
   payment-db:
     image: postgres:16
     environment:
@@ -79,19 +67,89 @@ services:
       POSTGRES_PASSWORD: payment_pass
     ports:
       - "5433:5432"
+    volumes:
+      # Runs once, when the data directory is first initialised.
+      - ./payment-service/db_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_user -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  order-service:
+    build: ./order-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+
+  customer-service:
+    build: ./customer-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+
+  restaurant-service:
+    build: ./restaurant-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
 
   payment-service:
     build: ./payment-service
     depends_on:
-      - kafka
-      - payment-db
+      kafka-init:
+        condition: service_completed_successfully
+      payment-db:
+        condition: service_healthy
     ports:
-      - "8083:8083"
-    environment:
-      KAFKA_BOOTSTRAP: kafka:9092
-      
+      - "8084:8084"
+
+  delivery-service:
+    build: ./delivery-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+
+  notification-service:
+    build: ./notification-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8086:8086"
+
+  admin-service:
+    build: ./admin-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8087:8087"
+
+  # Web UI + reverse proxy: http://localhost:3000. /api/<service>/... is
+  # forwarded to that service, so the browser never calls the services directly.
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+
 volumes:
   mongo-data:
-
-
-  
