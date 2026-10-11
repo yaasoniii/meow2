@@ -17,6 +17,9 @@ public function publishRestaurantStatus(string restaurantId, string orderId, str
 
     kafka:BytesProducerRecord producerRecord = {
         topic: restaurantStatusTopic,
+        // Keyed by orderId like every other topic, so all events for one order
+        // land on the same partition and stay in order.
+        key: orderId.toBytes(),
         value: event.toJsonString().toBytes()
     };
 

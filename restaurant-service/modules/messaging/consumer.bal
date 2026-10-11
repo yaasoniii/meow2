@@ -2,7 +2,7 @@ import ballerina/log;
 import ballerinax/kafka;
 import restaurant_service.store;
 
-configurable string kafkaBootstrapServers = "localhost:9092";
+configurable string kafkaBootstrapServers = "kafka:9092";
 configurable string ordersCreatedTopic = "orders.created";
 configurable string orderConsumerGroupId = "restaurant-service-group";
 
