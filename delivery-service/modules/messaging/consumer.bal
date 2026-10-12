@@ -86,7 +86,19 @@ isolated function handleOrderStatusUpdated(string payload) returns error? {
     }
 
     domain:Delivery? existing = check store:findDeliveryByOrderId(event.orderId);
-    if existing is () || !domain:isValidDeliveryStatusTransition(existing.status, domain:CANCELLED) {
+    if existing is () {
+        // The cancellation beat payments.completed here (different topics, no
+        // ordering between them). Record a CANCELLED delivery so the unique
+        // orderId index stops a late payment from creating a live one.
+        check store:saveDelivery({
+            deliveryId: uuid:createType1AsString(),
+            orderId: event.orderId,
+            status: domain:CANCELLED,
+            createdAt: time:utcToString(time:utcNow())
+        });
+        return;
+    }
+    if !domain:isValidDeliveryStatusTransition(existing.status, domain:CANCELLED) {
         return;
     }
     _ = check transitionDelivery(existing, domain:CANCELLED);

@@ -41,6 +41,11 @@ function init() returns error? {
     //One delivery per order
      // safe: the second insert fails instead of creating a duplicate delivery.
     check deliveryCollection->createIndex({orderId: 1}, {unique: true, name: "uniq_order_id"});
+    // Dispatch looks for free drivers and waiting deliveries (oldest first);
+    // the driver app lists a driver's own deliveries.
+    check driverCollection->createIndex({status: 1}, {name: "idx_driver_status"});
+    check deliveryCollection->createIndex({status: 1, createdAt: 1}, {name: "idx_status_created"});
+    check deliveryCollection->createIndex({driverId: 1, createdAt: -1}, {name: "idx_driver_created"});
 
     log:printInfo("Connected to MongoDB", database = mongoDatabase, host = mongoHost, port = mongoPort);
 }
