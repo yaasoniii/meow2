@@ -13,6 +13,7 @@ Restaurant profiles, opening hours and menus. It also reacts to new orders by re
 | GET    | /restaurants/{restaurantId} | Fetch one |
 | PUT    | /restaurants/{restaurantId} | Update `{name, description, location}` |
 | PUT    | /restaurants/{restaurantId}/hours | Update `{openTime, closeTime}` |
+| PUT    | /restaurants/{restaurantId}/availability | `{isOpen}`: pause or resume taking orders |
 | DELETE | /restaurants/{restaurantId} | Delete the restaurant and its menu (404 if unknown) |
 | GET    | /restaurants/{restaurantId}/menu | List menu items |
 | POST   | /restaurants/{restaurantId}/menu | Add `{name, description, price, stockCount}` (404 if the restaurant doesn't exist) |
@@ -24,8 +25,10 @@ Menu item reads, updates and deletes are scoped by **both** `restaurantId` and `
 
 ## Kafka
 
-- **Consumes** `orders.created`. For each item it decrements stock, floored at 0, and marks the item unavailable when stock reaches 0. It then publishes an acknowledgement.
-- **Produces** `restaurant.status` `{restaurantId, orderId, status: "ACKNOWLEDGED", timestamp}`, keyed by `orderId`. The Order Service uses this to move the order from `CREATED` to `CONFIRMED`.
+- **Consumes** `orders.created` and decides whether the kitchen can take the order (`modules/restaurant/ordering.bal`, unit tested):
+  - **Rejected** if the restaurant is paused, outside its opening hours (local time, UTC+2, overnight hours supported), or any item is missing or short on stock.
+  - **Accepted** otherwise. Stock is decremented atomically and an item is marked unavailable when it reaches 0.
+- **Produces** `restaurant.status` `{restaurantId, orderId, status: "ACKNOWLEDGED" | "REJECTED", reason, timestamp}`, keyed by `orderId`. The Order Service moves an acknowledged order from `CREATED` to `CONFIRMED`, and cancels a rejected one, storing the reason.
 
 ## Storage
 
@@ -35,7 +38,7 @@ MongoDB database `restaurant_service`, with collections `restaurants` and `menu_
 
 ```
 service.bal             REST API
-modules/restaurant/     types + validation (pure, unit tested)
+modules/restaurant/     types, validation, ordering rules (pure, unit tested)
 modules/store/          MongoDB access
 modules/messaging/      orders.created consumer, restaurant.status producer
 ```

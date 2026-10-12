@@ -7,11 +7,13 @@ final kafka:Producer statusProducer = check new (kafkaBootstrapServers, {
     acks: "1"
 });
 
-public function publishRestaurantStatus(string restaurantId, string orderId, string status) returns error? {
+public function publishRestaurantStatus(string restaurantId, string orderId, string status,
+        string? reason = ()) returns error? {
     RestaurantStatusEvent event = {
         restaurantId: restaurantId,
         orderId: orderId,
         status: status,
+        reason: reason,
         timestamp: time:utcToString(time:utcNow())
     };
 

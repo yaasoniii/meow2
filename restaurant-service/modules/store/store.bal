@@ -178,29 +178,27 @@ public function deleteMenuItem(string restaurantId, string itemId) returns boole
     return result.deletedCount > 0;
 }
 
-// Called only by the Kafka consumer when an order comes in. Floors stock
-// at 0 and auto-marks the item unavailable once it hits 0. Returns false
-// (not an error) when the item doesn't belong to this restaurant, so the
-// consumer can log-and-continue instead of failing the whole batch.
+// Called by the Kafka consumer once an order has been accepted. The stock
+// check and the decrement are one atomic update (the filter requires enough
+// stock), so stock can never go negative even if two orders race. Returns
+// false when there wasn't enough stock (or no such item).
 public function decrementStock(string restaurantId, string itemId, int quantity) returns boolean|error {
     mongodb:Collection menuItems = check menuItemsCollection();
-    restaurant:MenuItem? item = check menuItems->findOne({itemId: itemId, restaurantId: restaurantId});
-
-    if item is () {
+    mongodb:UpdateResult result = check menuItems->updateOne(
+        {itemId: itemId, restaurantId: restaurantId, stockCount: {"$gte": quantity}},
+        {inc: {stockCount: -quantity}}
+    );
+    if result.matchedCount == 0 {
         return false;
     }
-
-    int newStock = item.stockCount - quantity;
-    if newStock < 0 {
-        newStock = 0;
-    }
-
-    mongodb:Update update = {
-        set: {
-            stockCount: newStock,
-            available: newStock > 0
-        }
-    };
-    _ = check menuItems->updateOne({itemId: itemId, restaurantId: restaurantId}, update);
+    // Sold out -> hide it from the menu.
+    _ = check menuItems->updateOne({itemId: itemId, restaurantId: restaurantId, stockCount: {"$lte": 0}},
+            {set: {available: false}});
     return true;
+}
+
+// Pause / resume accepting orders, independent of opening hours.
+public function setRestaurantOpen(string restaurantId, boolean isOpen, string updatedAt) returns error? {
+    mongodb:Collection restaurants = check restaurantsCollection();
+    _ = check restaurants->updateOne({restaurantId: restaurantId}, {set: {isOpen: isOpen, updatedAt: updatedAt}});
 }

@@ -104,6 +104,20 @@ service /restaurants on restaurantListener {
         return loadRestaurant(restaurantId);
     }
 
+    // Pause (false) or resume (true) taking orders, e.g. when the kitchen is overwhelmed.
+    resource function put [string restaurantId]/availability(restaurant:UpdateAvailabilityRequest req)
+            returns restaurant:Restaurant|http:NotFound|http:InternalServerError {
+        restaurant:Restaurant|http:NotFound|http:InternalServerError existing = loadRestaurant(restaurantId);
+        if existing is http:NotFound || existing is http:InternalServerError {
+            return existing;
+        }
+        error? updateResult = store:setRestaurantOpen(restaurantId, req.isOpen, time:utcToString(time:utcNow()));
+        if updateResult is error {
+            return <http:InternalServerError>{body: {message: "Failed to update availability"}};
+        }
+        return loadRestaurant(restaurantId);
+    }
+
     resource function get [string restaurantId]/menu() returns restaurant:MenuItem[]|http:InternalServerError {
         restaurant:MenuItem[]|error result = store:findMenuByRestaurant(restaurantId);
         if result is error {

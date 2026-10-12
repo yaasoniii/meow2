@@ -39,6 +39,10 @@ public type UpdateRestaurantRequest record {|
     string location;
 |};
 
+public type UpdateAvailabilityRequest record {|
+    boolean isOpen;
+|};
+
 public type UpdateHoursRequest record {|
     string openTime;
     string closeTime;
