@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import {
-  CANCELLABLE, busy, delegate, empty, esc, formValues, initials, itemsLine, money, patch, pill, saved, shortId,
-  timeAgo, timeline, toast,
+  CANCELLABLE, busy, delegate, empty, esc, formValues, initials, isOpenNow, itemsLine, money, notificationItem,
+  openPill, patch, pill, saved, shortId, timeAgo, timeline, toast,
 } from '../ui.js';
 
 let root;
@@ -159,7 +159,7 @@ export async function refresh() {
     api.customers.get(state.customerId).catch((err) => err),
     settle(api.restaurants.list(), data.restaurants),
     settle(api.orders.list({ customerId: state.customerId }), data.orders),
-    settle(api.notifications.list({ customerId: state.customerId, limit: 100 }), data.notifications),
+    settle(api.notifications.list({ recipientId: state.customerId, audience: 'CUSTOMER', limit: 100 }), data.notifications),
     needsDelivery ? settle(api.deliveries.list(), data.deliveries) : data.deliveries,
     needsDelivery ? settle(api.drivers.list(), data.drivers) : data.drivers,
     state.restaurantId ? settle(api.restaurants.menu(state.restaurantId), data.menu) : [],
@@ -195,6 +195,7 @@ function renderRestaurants() {
         <button class="list-item ${r.restaurantId === state.restaurantId ? 'selected' : ''}" data-action="openRestaurant" data-id="${esc(r.restaurantId)}">
           <span class="avatar">${esc(initials(r.name))}</span>
           <span class="grow"><span class="title ellipsis">${esc(r.name)}</span><br><small>${esc(r.location)} · ${esc(r.hours.openTime)}–${esc(r.hours.closeTime)}</small></span>
+          ${openPill(r)}
         </button>`).join('')
     : empty('No restaurants yet', 'Register one in the Restaurant tab.'));
 }
@@ -205,9 +206,10 @@ function renderMenu() {
     patch($('c-menu'), empty('Pick a restaurant', 'Its menu will appear here.'));
     return;
   }
+  const open = isOpenNow(r);
   const items = data.menu.map((m) => {
     const inCart = state.cart.restaurantId === r.restaurantId ? state.cart.items[m.itemId]?.quantity || 0 : 0;
-    const soldOut = !m.available || m.stockCount <= inCart;
+    const soldOut = !open || !m.available || m.stockCount <= inCart;
     return `
       <div class="menu-item">
         <div class="grow">
@@ -222,7 +224,8 @@ function renderMenu() {
       </div>`;
   }).join('');
   patch($('c-menu'), `
-    <div class="card-head"><div><h2>${esc(r.name)}</h2><small>${esc(r.description)}</small></div></div>
+    <div class="card-head"><div><h2>${esc(r.name)}</h2><small>${esc(r.description)}</small></div>${openPill(r)}</div>
+    ${open ? '' : `<div class="banner" style="margin-bottom:8px">${r.isOpen ? `Closed right now – opens at ${esc(r.hours.openTime)}.` : 'Not taking orders right now.'} You can browse the menu but not order.</div>`}
     ${items || empty('No dishes yet', 'This restaurant has not added a menu.')}`);
 }
 
@@ -277,7 +280,7 @@ function nextStepHint(o, delivery, driver) {
     case 'READY': return driver ? `${who} is on the way to collect your food.` : 'Food is ready – finding a driver…';
     case 'OUT_FOR_DELIVERY': return `${who} is bringing your order.`;
     case 'DELIVERED': return 'Delivered. Enjoy your meal!';
-    case 'CANCELLED': return 'This order was cancelled.';
+    case 'CANCELLED': return o.cancellationReason ? `Cancelled: ${o.cancellationReason}.` : 'This order was cancelled.';
     default: return '';
   }
 }
@@ -332,9 +335,7 @@ function renderOrders() {
   }).join(''));
 }
 
-function feedItem(n) {
-  return `<div class="feed-item"><span class="bullet"></span><span><strong>${esc(n.title)}</strong> – ${esc(n.message)}</span><time datetime="${esc(n.timestamp)}">${timeAgo(n.timestamp)}</time></div>`;
-}
+const feedItem = (n) => notificationItem(n);
 
 function renderInbox() {
   patch($('c-inbox'), data.notifications.length

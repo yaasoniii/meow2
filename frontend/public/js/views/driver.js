@@ -1,9 +1,12 @@
 import { api } from '../api.js';
-import { busy, delegate, empty, esc, formValues, initials, itemsLine, money, patch, pill, saved, shortId, timeAgo, toast } from '../ui.js';
+import {
+  busy, delegate, empty, esc, formValues, initials, itemsLine, money, notificationItem, patch, pill, saved, shortId, timeAgo,
+  toast,
+} from '../ui.js';
 
 let root;
 const state = { driverId: saved.get('driverId') };
-let data = { driver: null, deliveries: [], pending: 0, job: null };
+let data = { driver: null, deliveries: [], pending: 0, job: null, notifications: [] };
 
 const $ = (id) => root.querySelector(`#${id}`);
 const refreshNow = () => window.dispatchEvent(new Event('kapana:refresh'));
@@ -54,7 +57,10 @@ function mainLayout() {
     </div>
     <div class="grid split">
       <section class="card"><div class="card-head"><h2>Current job</h2></div><div id="d-job"></div></section>
-      <section class="card"><h2>Recent deliveries</h2><div id="d-history" class="list"></div></section>
+      <div class="stack">
+        <section class="card"><h2>Recent deliveries</h2><div id="d-history" class="list"></div></section>
+        <section class="card"><div class="card-head"><h2>Notifications</h2><small>push + SMS</small></div><div id="d-inbox" class="feed"></div></section>
+      </div>
     </div>`;
 }
 
@@ -76,10 +82,11 @@ export async function refresh() {
     return;
   }
 
-  const [driver, deliveries, pending] = await Promise.all([
+  const [driver, deliveries, pending, notifications] = await Promise.all([
     api.drivers.get(state.driverId).catch((err) => err),
     api.deliveries.list({ driverId: state.driverId }).catch(() => data.deliveries),
     api.deliveries.list({ status: 'PENDING' }).catch(() => []),
+    api.notifications.list({ recipientId: state.driverId, audience: 'DRIVER', limit: 20 }).catch(() => data.notifications),
   ]);
   if (driver instanceof Error) {
     if (driver.status === 404) { toast('That driver no longer exists', 'error'); signOut(); }
@@ -98,7 +105,8 @@ export async function refresh() {
     job = { delivery: active, order, restaurant, customer };
   }
 
-  data = { driver, deliveries, pending: pending.length, job };
+  data = { driver, deliveries, pending: pending.length, job, notifications };
+  patch($('d-inbox'), notifications.length ? notifications.map((n) => notificationItem(n)).join('') : empty('No notifications yet'));
   patch($('d-name'), esc(driver.name));
   patch($('d-sub'), `${esc(driver.vehicleType)} · ${esc(driver.plateNumber)} · ${esc(driver.phoneNumber)} · ${pill(driver.status)}`);
   patch($('d-toggle'), driver.status === 'ON_DELIVERY' ? ''

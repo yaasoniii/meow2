@@ -210,6 +210,7 @@ button.list-item:hover { border-color: var(--accent); }
 .pill-confirmed, .pill-assigned, .pill-picked_up, .pill-in_progress, .pill-out_for_delivery { background: var(--info-soft); color: var(--info); }
 .pill-preparing, .pill-ready, .pill-on_delivery { background: var(--warn-soft); color: var(--warn); }
 .pill-delivered, .pill-success, .pill-available, .pill-up { background: var(--ok-soft); color: var(--ok); }
+.pill-refunded { background: var(--info-soft); color: var(--info); }
 .pill-cancelled, .pill-failed, .pill-down { background: var(--bad-soft); color: var(--bad); }
 
 /* ---------- Order timeline ---------- */

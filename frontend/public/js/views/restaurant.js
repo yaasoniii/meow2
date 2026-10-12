@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import {
-  CANCELLABLE, busy, delegate, empty, esc, formValues, initials, money, patch, pill, saved, shortId, timeAgo, toast,
+  CANCELLABLE, busy, delegate, empty, esc, formValues, initials, money, notificationItem, openPill, patch, pill, saved,
+  shortId, timeAgo, toast,
 } from '../ui.js';
 
 let root;
@@ -8,7 +9,7 @@ const state = {
   restaurantId: saved.get('restaurantId'),
   tab: saved.get('restaurantTab', 'board'),
 };
-let data = { restaurant: null, restaurants: [], menu: [], orders: [] };
+let data = { restaurant: null, restaurants: [], menu: [], orders: [], notifications: [] };
 
 const $ = (id) => root.querySelector(`#${id}`);
 const refreshNow = () => window.dispatchEvent(new Event('kapana:refresh'));
@@ -59,15 +60,19 @@ function mainLayout() {
   return `
     <div class="page-head">
       <div><h1 id="r-name">Restaurant</h1><p class="muted" id="r-sub"></p></div>
-      <button class="btn ghost" data-action="signout">Switch restaurant</button>
+      <div class="row"><span id="r-toggle"></span><button class="btn ghost" data-action="signout">Switch restaurant</button></div>
     </div>
     <div class="tabs" id="r-tabs"></div>
     <div data-tab="board">
       <div class="banner info" style="margin-bottom:14px">
-        New orders are accepted automatically (Kafka <code>restaurant.status</code>) and move to <strong>Preparing</strong> once payment clears.
-        Mark them <strong>Ready</strong> when the food is done – the driver then collects it.
+        New orders are checked automatically against your opening hours, the pause switch and stock, then accepted or rejected
+        (Kafka <code>restaurant.status</code>). Accepted orders move to <strong>Preparing</strong> once payment clears –
+        mark them <strong>Ready</strong> when the food is done and the driver collects it.
       </div>
       <div id="r-board" class="board"></div>
+    </div>
+    <div data-tab="inbox">
+      <section class="card"><div class="card-head"><h2>Notifications</h2><small>Sent to this restaurant via dashboard + email</small></div><div id="r-inbox" class="feed"></div></section>
     </div>
     <div data-tab="menu">
       <div class="grid split">
@@ -97,7 +102,7 @@ function showTab(tab) {
 
 function renderTabs() {
   const waiting = data.orders.filter((o) => o.status === 'PREPARING').length;
-  const tabs = [['board', `Orders${waiting ? `<span class="count">${waiting}</span>` : ''}`], ['menu', 'Menu']];
+  const tabs = [['board', `Orders${waiting ? `<span class="count">${waiting}</span>` : ''}`], ['menu', 'Menu'], ['inbox', 'Notifications']];
   patch($('r-tabs'), tabs.map(([id, label]) =>
     `<button class="${state.tab === id ? 'active' : ''}" data-action="tab" data-tab-id="${id}">${label}</button>`).join(''));
 }
@@ -119,18 +124,21 @@ export async function refresh() {
     return;
   }
 
-  const [restaurant, menu, orders] = await Promise.all([
+  const [restaurant, menu, orders, notifications] = await Promise.all([
     api.restaurants.get(state.restaurantId).catch((err) => err),
     api.restaurants.menu(state.restaurantId).catch(() => data.menu),
     api.orders.list({ restaurantId: state.restaurantId }).catch(() => data.orders),
+    api.notifications.list({ recipientId: state.restaurantId, audience: 'RESTAURANT', limit: 50 }).catch(() => data.notifications),
   ]);
   if (restaurant instanceof Error) {
     if (restaurant.status === 404) { toast('That restaurant no longer exists', 'error'); signOut(); }
     return;
   }
-  data = { ...data, restaurant, menu, orders };
+  data = { ...data, restaurant, menu, orders, notifications };
   patch($('r-name'), esc(restaurant.name));
-  patch($('r-sub'), `${esc(restaurant.location)} · open ${esc(restaurant.hours.openTime)}–${esc(restaurant.hours.closeTime)} · <code>${esc(shortId(restaurant.restaurantId))}</code>`);
+  patch($('r-sub'), `${esc(restaurant.location)} · open ${esc(restaurant.hours.openTime)}–${esc(restaurant.hours.closeTime)} · ${openPill(restaurant)} · <code>${esc(shortId(restaurant.restaurantId))}</code>`);
+  patch($('r-toggle'), `<button class="btn ${restaurant.isOpen ? 'ghost' : 'ok'}" data-action="toggleOpen">${restaurant.isOpen ? 'Pause orders' : 'Resume orders'}</button>`);
+  patch($('r-inbox'), notifications.length ? notifications.map((n) => notificationItem(n)).join('') : empty('No notifications yet'));
   renderTabs();
   renderBoard();
   renderMenu();
@@ -146,6 +154,7 @@ function ticket(o) {
   if (o.status === 'CREATED') note = 'Accepting…';
   if (o.status === 'CONFIRMED') note = o.paymentStatus === 'FAILED' ? 'Payment failed – waiting for customer retry' : 'Waiting for payment';
   if (o.status === 'READY') note = 'Waiting for driver pickup';
+  if (o.status === 'CANCELLED' && o.cancellationReason) note = o.cancellationReason;
   return `
     <div class="ticket">
       <div class="row between"><strong>#${esc(shortId(o.orderId))}</strong><small>${timeAgo(o.createdAt)}</small></div>
@@ -227,6 +236,12 @@ const handlers = {
   pick: (el) => pick(el.dataset.id),
   signout: signOut,
   tab: (el) => showTab(el.dataset.tabId),
+
+  toggleOpen: (btn) => busy(btn, async () => {
+    const r = await api.restaurants.setOpen(state.restaurantId, !data.restaurant.isOpen);
+    toast(r.isOpen ? 'Taking orders again' : 'Paused – new orders will be rejected', r.isOpen ? 'ok' : 'info');
+    refreshNow();
+  }),
 
   register: (form, btn) => busy(btn, async () => {
     const v = formValues(form);

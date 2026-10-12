@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { busy, delegate, empty, esc, patch, pill, saved, shortId, timeAgo, toast } from '../ui.js';
+import { busy, delegate, empty, esc, notificationItem, patch, pill, saved, toast } from '../ui.js';
 
 const SERVICES = [
   { key: 'order', name: 'Order Service', port: 8081, health: '/health', owner: 'Jason' },
@@ -13,12 +13,12 @@ const SERVICES = [
 
 const FLOW = [
   ['Customer places an order', 'Order Service saves it as <b>CREATED</b> and publishes <code>orders.created</code>.'],
-  ['Restaurant accepts', 'Restaurant Service consumes <code>orders.created</code>, reduces stock and publishes <code>restaurant.status</code> ACKNOWLEDGED → order <b>CONFIRMED</b>.'],
+  ['Restaurant accepts or rejects', 'Restaurant Service consumes <code>orders.created</code>, checks opening hours and stock, reduces stock and publishes <code>restaurant.status</code> ACKNOWLEDGED → order <b>CONFIRMED</b> (or REJECTED → <b>CANCELLED</b> and refunded).'],
   ['Payment is taken', 'Payment Service consumes <code>orders.created</code>, charges (simulated) and publishes <code>payments.completed</code> SUCCESS/FAILED → order <b>PREPARING</b> once both have happened.'],
   ['Driver assigned', 'Delivery Service consumes <code>payments.completed</code>, creates a delivery and claims a free driver → <code>delivery.assigned</code>.'],
   ['Food is ready', 'The restaurant marks the order <b>READY</b> (REST) → <code>orders.status_updated</code>.'],
   ['Pickup & delivery', 'The driver confirms pickup and delivery → <code>delivery.status_updated</code> → order <b>OUT_FOR_DELIVERY</b> then <b>DELIVERED</b>.'],
-  ['Everyone is told', 'Notification and Admin Services consume every topic to build the inbox and platform statistics.'],
+  ['Everyone is told', 'Notification Service alerts the customer (email + SMS), restaurant (dashboard + email) and driver (push + SMS); Admin Service builds platform statistics.'],
 ];
 
 let root;
@@ -38,7 +38,7 @@ export function mount(el) {
     <div class="grid cols-2">
       <section class="card"><h2>How an order flows</h2><div class="flow">${FLOW.map(([t, d]) => `<div class="flow-step"><div><h3>${t}</h3><p class="muted">${d}</p></div></div>`).join('')}</div></section>
       <section class="card">
-        <div class="card-head"><h2>Live events</h2><small>via the Notification Service</small></div>
+        <div class="card-head"><h2>Live notifications</h2><small>every alert, to every audience</small></div>
         <div id="s-feed" class="feed"></div>
       </section>
     </div>`;
@@ -60,10 +60,7 @@ export async function refresh() {
 
   try {
     const events = await api.notifications.list({ limit: 40 });
-    patch($('s-feed'), events.length ? events.map((n) => `
-      <div class="feed-item"><span class="bullet"></span>
-        <span><strong>${esc(n.title)}</strong> <span class="topic">${esc(n.topic)}</span><br><small>order <code>${esc(shortId(n.orderId))}</code> – ${esc(n.message)}</small></span>
-        <time datetime="${esc(n.timestamp)}">${timeAgo(n.timestamp)}</time></div>`).join('')
+    patch($('s-feed'), events.length ? events.map((n) => notificationItem(n, { showAudience: true })).join('')
       : empty('No events yet', 'Place an order and watch it flow through the services.'));
   } catch (err) {
     patch($('s-feed'), `<div class="banner">${esc(err.message)}</div>`);
@@ -75,7 +72,7 @@ export async function refresh() {
 async function seedDemoData() {
   const restaurant = await api.restaurants.register({
     ownerId: 'owner-demo', name: 'Kapana Corner', description: 'Flame-grilled street food from Katutura',
-    location: 'Katutura, Windhoek', hours: { openTime: '08:00', closeTime: '22:00' },
+    location: 'Katutura, Windhoek', hours: { openTime: '06:00', closeTime: '23:59' },
   });
   const dishes = [
     ['Kapana beef strips', 'Grilled on the open fire, with chilli salt and salsa', 45, 40],

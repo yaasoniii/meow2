@@ -32,7 +32,7 @@ export const LABEL = {
   CREATED: 'Placed', CONFIRMED: 'Confirmed', PREPARING: 'Preparing', READY: 'Ready',
   OUT_FOR_DELIVERY: 'On the way', DELIVERED: 'Delivered', CANCELLED: 'Cancelled',
   PENDING: 'Awaiting driver', ASSIGNED: 'Driver assigned', PICKED_UP: 'Picked up', IN_PROGRESS: 'En route',
-  SUCCESS: 'Paid', FAILED: 'Payment failed',
+  SUCCESS: 'Paid', FAILED: 'Payment failed', REFUNDED: 'Refunded',
   AVAILABLE: 'Available', ON_DELIVERY: 'On delivery', UNAVAILABLE: 'Off shift',
   UP: 'Up', DOWN: 'Down',
 };
@@ -54,6 +54,31 @@ export function timeline(order, reachedBeforeCancel = 0) {
     return `<div class="step ${cls}"><span class="dot"></span><span>${esc(LABEL[s])}</span></div>`;
   }).join('');
   return `<div class="timeline ${cancelled ? 'cancelled' : ''}" role="img" aria-label="Order status: ${esc(LABEL[order.status] || order.status)}">${steps}</div>`;
+}
+
+// Mirrors the Restaurant Service's rule (isWithinOpeningHours): open time
+// inclusive, close time exclusive, overnight hours allowed, equal = all day.
+export function isOpenNow(r, now = new Date()) {
+  if (!r || !r.isOpen) return false;
+  const mins = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+  const open = mins(r.hours.openTime);
+  const close = mins(r.hours.closeTime);
+  const cur = now.getHours() * 60 + now.getMinutes();
+  if (open === close) return true;
+  return open < close ? cur >= open && cur < close : cur >= open || cur < close;
+}
+
+export function openPill(r) {
+  if (!r.isOpen) return pill('UNAVAILABLE', 'Paused');
+  return isOpenNow(r) ? pill('AVAILABLE', 'Open') : pill('UNAVAILABLE', `Opens ${r.hours.openTime}`);
+}
+
+// One notification row; shows who it was for and on which channels when asked.
+export function notificationItem(n, { showAudience = false } = {}) {
+  const meta = showAudience
+    ? `<br><small><span class="topic">${esc(n.audience)}</span> ${(n.channels || []).map((c) => `<span class="topic">${esc(c)}</span>`).join(' ')} · order <code>${esc(shortId(n.orderId))}</code></small>`
+    : `<br><small class="muted">via ${esc((n.channels || []).join(' + ').toLowerCase())}</small>`;
+  return `<div class="feed-item"><span class="bullet"></span><span><strong>${esc(n.title)}</strong> – ${esc(n.message)}${meta}</span><time datetime="${esc(n.timestamp)}">${timeAgo(n.timestamp)}</time></div>`;
 }
 
 export function empty(title, hint = '') {

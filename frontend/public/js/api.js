@@ -54,6 +54,7 @@ export const api = {
     get: (id) => request('restaurant', `/restaurants/${enc(id)}`),
     register: (body) => request('restaurant', '/restaurants', { method: 'POST', body }),
     menu: (id) => request('restaurant', `/restaurants/${enc(id)}/menu`),
+    setOpen: (id, isOpen) => request('restaurant', `/restaurants/${enc(id)}/availability`, { method: 'PUT', body: { isOpen } }),
     addItem: (id, body) => request('restaurant', `/restaurants/${enc(id)}/menu`, { method: 'POST', body }),
     updateItem: (id, itemId, body) =>
       request('restaurant', `/restaurants/${enc(id)}/menu/${enc(itemId)}`, { method: 'PUT', body }),
