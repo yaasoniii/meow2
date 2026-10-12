@@ -75,12 +75,14 @@ type DeliveryCompleted record {
     string timestamp;
 };
 
+// Reported by GET /admin/health. The listener gets its own (mutable) list below:
+// the Kafka connector fails at runtime if handed a readonly array.
 final string[] & readonly consumedTopics =
     ["orders.created", "orders.status_updated", "payments.completed", "delivery.assigned", "delivery.completed"];
 
 listener kafka:Listener eventListener = new (kafkaBootstrapServers, {
     groupId: "admin-service",
-    topics: consumedTopics,
+    topics: ["orders.created", "orders.status_updated", "payments.completed", "delivery.assigned", "delivery.completed"],
     offsetReset: kafka:OFFSET_RESET_EARLIEST,
     autoCommit: false
 });
