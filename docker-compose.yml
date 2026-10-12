@@ -85,6 +85,14 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8081"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   customer-service:
     build: ./customer-service
@@ -95,6 +103,14 @@ services:
         condition: service_healthy
     ports:
       - "8082:8082"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8082"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   restaurant-service:
     build: ./restaurant-service
@@ -105,6 +121,14 @@ services:
         condition: service_healthy
     ports:
       - "8083:8083"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8083"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   payment-service:
     build: ./payment-service
@@ -115,6 +139,14 @@ services:
         condition: service_healthy
     ports:
       - "8084:8084"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8084"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   delivery-service:
     build: ./delivery-service
@@ -125,14 +157,32 @@ services:
         condition: service_healthy
     ports:
       - "8085:8085"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8085"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   notification-service:
     build: ./notification-service
     depends_on:
       kafka-init:
         condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
     ports:
       - "8086:8086"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8086"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   admin-service:
     build: ./admin-service
@@ -143,6 +193,14 @@ services:
         condition: service_healthy
     ports:
       - "8087:8087"
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once the HTTP port accepts connections (bash is in the JRE image).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8087"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 40s
 
   # Web UI + reverse proxy: http://localhost:3000. /api/<service>/... is
   # forwarded to that service, so the browser never calls the services directly.
@@ -150,6 +208,7 @@ services:
     build: ./frontend
     ports:
       - "3000:80"
+    restart: unless-stopped
 
 volumes:
   mongo-data:
