@@ -1,5 +1,7 @@
 import ballerina/http;
+import ballerina/log;
 import dsa612s/notification_service.messaging;
+import dsa612s/notification_service.store;
 
 configurable int servicePort = 8086;
 
@@ -12,10 +14,23 @@ type HealthStatus record {|
 
 service /notifications on notificationListener {
 
-    // Newest first. Filter with ?customerId= and/or ?orderId=; ?limit= caps the count.
-    resource function get .(string? customerId = (), string? orderId = (), int 'limit = 50)
-            returns messaging:Notification[] {
-        return messaging:listNotifications(customerId, orderId, 'limit);
+    // Newest first. Filter by ?recipientId= (a customer, restaurant or driver id),
+    // ?audience= (CUSTOMER / RESTAURANT / DRIVER) and/or ?orderId=; ?limit= caps the count.
+    resource function get .(string? recipientId = (), string? audience = (), string? orderId = (),
+            int 'limit = 50) returns store:Notification[]|http:BadRequest|http:InternalServerError {
+        if 'limit < 1 || 'limit > 500 {
+            return <http:BadRequest>{body: {message: "limit must be between 1 and 500"}};
+        }
+        if audience is string && audience != "CUSTOMER" && audience != "RESTAURANT" && audience != "DRIVER" {
+            return <http:BadRequest>{body: {message: "audience must be CUSTOMER, RESTAURANT or DRIVER"}};
+        }
+        store:Notification[]|error notifications =
+            store:listNotifications(recipientId, audience, orderId, 'limit);
+        if notifications is error {
+            log:printError("Failed to list notifications", notifications);
+            return <http:InternalServerError>{body: {message: "Failed to list notifications"}};
+        }
+        return notifications;
     }
 }
 

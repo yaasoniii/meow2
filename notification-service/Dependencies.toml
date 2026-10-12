@@ -269,11 +269,10 @@ dependencies = [
 [[package]]
 org = "ballerina"
 name = "task"
-version = "2.11.3"
+version = "2.7.0"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"},
-	{org = "ballerina", name = "time"},
-	{org = "ballerina", name = "uuid"}
+	{org = "ballerina", name = "time"}
 ]
 
 [[package]]
@@ -301,9 +300,6 @@ dependencies = [
 	{org = "ballerina", name = "jballerina.java"},
 	{org = "ballerina", name = "lang.int"},
 	{org = "ballerina", name = "time"}
-]
-modules = [
-	{org = "ballerina", packageName = "uuid", moduleName = "uuid"}
 ]
 
 [[package]]
@@ -355,18 +351,33 @@ modules = [
 ]
 
 [[package]]
+org = "ballerinax"
+name = "mongodb"
+version = "5.2.4"
+dependencies = [
+	{org = "ballerina", name = "crypto"},
+	{org = "ballerina", name = "jballerina.java"},
+	{org = "ballerina", name = "log"},
+	{org = "ballerina", name = "time"}
+]
+modules = [
+	{org = "ballerinax", packageName = "mongodb", moduleName = "mongodb"}
+]
+
+[[package]]
 org = "dsa612s"
 name = "notification_service"
 version = "0.1.0"
 dependencies = [
 	{org = "ballerina", name = "http"},
 	{org = "ballerina", name = "log"},
-	{org = "ballerina", name = "uuid"},
 	{org = "ballerinai", name = "observe"},
-	{org = "ballerinax", name = "kafka"}
+	{org = "ballerinax", name = "kafka"},
+	{org = "ballerinax", name = "mongodb"}
 ]
 modules = [
 	{org = "dsa612s", packageName = "notification_service", moduleName = "notification_service"},
-	{org = "dsa612s", packageName = "notification_service", moduleName = "notification_service.messaging"}
+	{org = "dsa612s", packageName = "notification_service", moduleName = "notification_service.messaging"},
+	{org = "dsa612s", packageName = "notification_service", moduleName = "notification_service.store"}
 ]
 

@@ -2,21 +2,32 @@
 
 Owner: Gerson
 
-Turns platform events into readable notifications for customers. In a real deployment these would be sent as email, SMS or push messages. Here they are logged and served over REST.
+Turns platform events into alerts for **customers, restaurants and drivers**, over several (simulated) channels:
+
+| Audience | Channels | Example alerts |
+|----------|----------|----------------|
+| Customer | email + SMS | order placed, accepted or rejected, payment received, failed or refunded, driver assigned, each status change |
+| Restaurant | dashboard + email | new order, payment confirmed (start preparing), order cancelled, order delivered |
+| Driver | push + SMS | new delivery job, order ready for pickup, delivery cancelled, delivery completed |
+
+Each send is logged as `[CHANNEL] -> AUDIENCE <id>: title`, as a stand-in for a real email, SMS or push gateway call, and stored in MongoDB.
 
 ## Kafka (consumes)
 
 `orders.created`, `orders.status_updated`, `payments.completed`, `restaurant.status`, `delivery.assigned` and `delivery.completed`.
 
-Each event is parsed into its type in `modules/messaging/types.bal` and turned into a `Notification` `{notificationId, topic, orderId, customerId, title, message, timestamp}`. Most events only carry `orderId`. The service remembers `orderId -> customerId` from `orders.created` (and `payments.completed`) so it can address every notification to the right customer.
-
 ## REST API (port 8086)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /notifications?customerId=&orderId=&limit=50 | Newest first |
+| GET | /notifications?recipientId=&audience=&orderId=&limit=50 | Newest first. `audience` is CUSTOMER, RESTAURANT or DRIVER; `limit` is 1-500 |
 | GET | /health | `{status, consumedTopics}` |
 
 ## Storage
 
-**In memory for now** (`modules/messaging/inbox.bal`, capped at 1000 entries). The database is planned for later. Until then, every start joins a fresh consumer group and replays all topics from the beginning, which rebuilds the inbox after a restart. Once notifications are persisted, remove the random suffix in `consumer.bal` so committed offsets are used again.
+MongoDB database `notification_service`:
+
+- `notifications`: one document per alert per recipient. `notificationId` is `<topic>-<partition>-<offset>-<audience>`, used as the upsert key, so a redelivered event never creates duplicates.
+- `order_contexts`: `orderId -> customerId, restaurantId, driverId`, assembled from events. Most events only carry `orderId`; this collection is how alerts reach the right people.
+
+Indexes are created at startup in `modules/store`. See [DATABASE.md](../DATABASE.md).

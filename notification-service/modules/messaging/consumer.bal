@@ -1,6 +1,6 @@
 import ballerina/log;
-import ballerina/uuid;
 import ballerinax/kafka;
+import dsa612s/notification_service.store;
 
 configurable string kafkaBootstrapServers = "kafka:9092";
 
@@ -13,14 +13,16 @@ configurable string deliveryCompletedTopic = "delivery.completed";
 
 configurable string notificationConsumerGroupId = "notification-service-consumer";
 
-// Notifications are only held in memory for now, so each run joins a fresh
-// consumer group and reads every topic from the beginning - that rebuilds the
-// inbox after a restart. Once notifications are persisted, drop the suffix so
-// the group's committed offsets are used again.
-final string consumerGroupId = notificationConsumerGroupId + "-" + uuid:createType4AsString();
+// Simulated delivery channels per audience. Each send is logged as the stand-in
+// for a real email / SMS / push gateway call.
+final readonly & map<string[]> channelsFor = {
+    CUSTOMER: ["EMAIL", "SMS"],
+    RESTAURANT: ["DASHBOARD", "EMAIL"],
+    DRIVER: ["PUSH", "SMS"]
+};
 
 listener kafka:Listener notificationListener = new (kafkaBootstrapServers, {
-    groupId: consumerGroupId,
+    groupId: notificationConsumerGroupId,
     topics: [
         ordersCreatedTopic,
         ordersStatusUpdatedTopic,
@@ -51,89 +53,137 @@ service on notificationListener {
     }
 }
 
+// Everything needed to send the alerts for one Kafka record.
+type Event record {|
+    string id; // "<topic>-<partition>-<offset>"
+    string topic;
+    string orderId;
+    string timestamp;
+|};
+
 isolated function handleNotificationEvent(kafka:BytesConsumerRecord kafkaRecord) returns error? {
     string topic = kafkaRecord.offset.partition.topic;
     string payload = check string:fromBytes(kafkaRecord.value);
+    string id = string `${topic}-${kafkaRecord.offset.partition.partition}-${kafkaRecord.offset.offset}`;
 
     if topic == ordersCreatedTopic {
-        OrderCreatedEvent event = check payload.fromJsonStringWithType(OrderCreatedEvent);
-        rememberCustomer(event.orderId, event.customerId);
-        int itemCount = 0;
-        foreach OrderItemPayload item in event.items {
-            itemCount += item.quantity;
+        OrderCreatedEvent e = check payload.fromJsonStringWithType(OrderCreatedEvent);
+        check store:rememberOrder(e.orderId, {customerId: e.customerId, restaurantId: e.restaurantId});
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        int count = 0;
+        string[] lines = [];
+        foreach OrderItemPayload item in e.items {
+            count += item.quantity;
+            lines.push(string `${item.quantity}x ${item.name}`);
         }
-        notify(topic, event.orderId, event.timestamp, "Order placed",
-                string `Your order of ${itemCount} item(s) totalling ${money(event.totalAmount)} was placed.`);
+        check notify(ev, store:CUSTOMER, "Order placed",
+                string `Your order of ${count} item(s) totalling ${money(e.totalAmount)} was placed.`);
+        check notify(ev, store:RESTAURANT, "New order",
+                string `Order #${short(e.orderId)}: ${string:'join(", ", ...lines)} (${money(e.totalAmount)}).`);
         return;
     }
 
     if topic == ordersStatusUpdatedTopic {
-        OrderStatusUpdatedEvent event = check payload.fromJsonStringWithType(OrderStatusUpdatedEvent);
-        [string, string] [title, message] = describeOrderStatus(event.newStatus);
-        notify(topic, event.orderId, event.timestamp, title, message);
+        OrderStatusUpdatedEvent e = check payload.fromJsonStringWithType(OrderStatusUpdatedEvent);
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        [string, string] [title, message] = describeOrderStatus(e.newStatus);
+        check notify(ev, store:CUSTOMER, title, message);
+        if e.newStatus == "READY" {
+            check notify(ev, store:DRIVER, "Ready for pickup",
+                    string `Order #${short(e.orderId)} is packed and waiting for you at the restaurant.`);
+        } else if e.newStatus == "CANCELLED" {
+            check notify(ev, store:RESTAURANT, "Order cancelled",
+                    string `Order #${short(e.orderId)} was cancelled - stop preparing it.`);
+            check notify(ev, store:DRIVER, "Delivery cancelled",
+                    string `Order #${short(e.orderId)} was cancelled - no pickup needed.`);
+        } else if e.newStatus == "DELIVERED" {
+            check notify(ev, store:RESTAURANT, "Order delivered",
+                    string `Order #${short(e.orderId)} reached the customer.`);
+        }
         return;
     }
 
     if topic == paymentsCompletedTopic {
-        PaymentCompletedEvent event = check payload.fromJsonStringWithType(PaymentCompletedEvent);
-        string? customerId = event?.customerId;
+        PaymentCompletedEvent e = check payload.fromJsonStringWithType(PaymentCompletedEvent);
+        string? customerId = e?.customerId;
         if customerId is string {
-            rememberCustomer(event.orderId, customerId);
+            check store:rememberOrder(e.orderId, {customerId});
         }
-        decimal? amount = event?.amount;
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        decimal? amount = e?.amount;
         string amountText = amount is decimal ? " of " + money(amount) : "";
-        if event.status == "SUCCESS" {
-            notify(topic, event.orderId, event.timestamp, "Payment received",
-                    string `Your payment${amountText} was successful.`);
+        if e.status == "SUCCESS" {
+            check notify(ev, store:CUSTOMER, "Payment received", string `Your payment${amountText} was successful.`);
+            check notify(ev, store:RESTAURANT, "Payment confirmed",
+                    string `Order #${short(e.orderId)} is paid - start preparing.`);
+        } else if e.status == "REFUNDED" {
+            check notify(ev, store:CUSTOMER, "Refund issued",
+                    string `Your payment${amountText} has been refunded.`);
         } else {
-            notify(topic, event.orderId, event.timestamp, "Payment failed",
+            check notify(ev, store:CUSTOMER, "Payment failed",
                     string `Your payment${amountText} did not go through. You can retry it from your order.`);
         }
         return;
     }
 
     if topic == restaurantStatusTopic {
-        RestaurantStatusEvent event = check payload.fromJsonStringWithType(RestaurantStatusEvent);
-        if event.status == "ACKNOWLEDGED" {
-            notify(topic, event.orderId, event.timestamp, "Restaurant accepted",
-                    "The restaurant has received your order.");
-        } else {
-            notify(topic, event.orderId, event.timestamp, "Restaurant update",
-                    "Restaurant status: " + event.status);
+        RestaurantStatusEvent e = check payload.fromJsonStringWithType(RestaurantStatusEvent);
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        if e.status == "ACKNOWLEDGED" {
+            check notify(ev, store:CUSTOMER, "Restaurant accepted", "The restaurant has received your order.");
+        } else if e.status == "REJECTED" {
+            check notify(ev, store:CUSTOMER, "Order rejected",
+                    (e?.reason ?: "The restaurant could not take your order") + ". Any payment will be refunded.");
         }
         return;
     }
 
     if topic == deliveryAssignedTopic {
-        DeliveryAssignedEvent event = check payload.fromJsonStringWithType(DeliveryAssignedEvent);
-        notify(topic, event.orderId, event.timestamp, "Driver assigned",
-                "A driver has been assigned to deliver your order.");
+        DeliveryAssignedEvent e = check payload.fromJsonStringWithType(DeliveryAssignedEvent);
+        check store:rememberOrder(e.orderId, {driverId: e.driverId});
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        check notify(ev, store:CUSTOMER, "Driver assigned", "A driver has been assigned to deliver your order.");
+        check notify(ev, store:DRIVER, "New delivery job",
+                string `You have been assigned order #${short(e.orderId)}. Head to the restaurant.`);
         return;
     }
 
     if topic == deliveryCompletedTopic {
-        DeliveryCompletedEvent event = check payload.fromJsonStringWithType(DeliveryCompletedEvent);
-        notify(topic, event.orderId, event.timestamp, "Delivery completed",
-                "Your driver has marked the order as delivered.");
+        DeliveryCompletedEvent e = check payload.fromJsonStringWithType(DeliveryCompletedEvent);
+        Event ev = {id, topic, orderId: e.orderId, timestamp: e.timestamp};
+        check notify(ev, store:DRIVER, "Delivery completed",
+                string `Order #${short(e.orderId)} delivered - you are available for the next job.`);
         return;
     }
 
     log:printWarn("Ignoring event from an unexpected topic", topic = topic);
 }
 
-isolated function notify(string topic, string orderId, string timestamp, string title, string message) {
-    Notification notification = {
-        notificationId: uuid:createType4AsString(),
-        topic: topic,
-        orderId: orderId,
-        customerId: customerFor(orderId),
-        title: title,
-        message: message,
-        timestamp: timestamp
+// Stores one notification for `audience` and "sends" it on each of that audience's channels.
+isolated function notify(Event ev, store:Audience audience, string title, string message) returns error? {
+    store:OrderContext ctx = check store:findOrderContext(ev.orderId);
+    string? recipientId = audience == store:CUSTOMER ? ctx?.customerId
+        : audience == store:RESTAURANT ? ctx?.restaurantId : ctx?.driverId;
+    if audience == store:DRIVER && recipientId is () {
+        return; // no driver assigned yet - nobody to tell
+    }
+
+    string[] channels = channelsFor[audience] ?: [];
+    store:Notification notification = {
+        notificationId: ev.id + "-" + audience,
+        topic: ev.topic,
+        orderId: ev.orderId,
+        audience,
+        recipientId,
+        channels,
+        title,
+        message,
+        timestamp: ev.timestamp
     };
-    addNotification(notification);
-    // Stand-in for sending an email/SMS/push.
-    log:printInfo("Notification", title = title, orderId = orderId, customerId = notification.customerId);
+    check store:saveNotification(notification);
+    foreach string channel in channels {
+        log:printInfo(string `[${channel}] -> ${audience} ${recipientId ?: "?"}: ${title}`, orderId = ev.orderId);
+    }
 }
 
 isolated function describeOrderStatus(string status) returns [string, string] {
@@ -162,6 +212,10 @@ isolated function describeOrderStatus(string status) returns [string, string] {
 
 isolated function money(decimal amount) returns string {
     return "N$" + amount.round(2).toString();
+}
+
+isolated function short(string id) returns string {
+    return id.length() > 8 ? id.substring(0, 8) : id;
 }
 
 // For GET /health, and so service.bal imports this module (which starts the listener).
