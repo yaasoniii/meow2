@@ -32,12 +32,13 @@ type PaymentCompletedEvent record {
     string timestamp?;
 };
 
-// restaurant.status - owned by the Restaurant Service. "ACKNOWLEDGED" means the
-// restaurant has accepted the order, which is what confirms it.
+// restaurant.status - owned by the Restaurant Service. "ACKNOWLEDGED" confirms
+// the order; "REJECTED" (with a reason) cancels it.
 type RestaurantStatusEvent record {
     string orderId;
     string status;
     string restaurantId?;
+    string? reason?;
     string timestamp?;
 };
 

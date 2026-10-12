@@ -21,8 +21,9 @@ service /orders on orderListener {
     // Create a new order -> CREATED, persists to MongoDB, publishes orders.created
     resource function post .(lifecycle:CreateOrderRequest req)
             returns lifecycle:Order|http:BadRequest|http:InternalServerError {
-        if req.items.length() == 0 {
-            return <http:BadRequest>{body: {message: "Order must contain at least one item"}};
+        string? invalid = lifecycle:validateCreateOrder(req);
+        if invalid is string {
+            return <http:BadRequest>{body: {message: invalid}};
         }
 
         string id = uuid:createType1AsString();

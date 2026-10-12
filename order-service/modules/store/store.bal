@@ -35,6 +35,10 @@ function init() returns error? {
     // orderId is the natural key the whole platform uses to reference an order,
     // so it must be unique even though Mongo's own _id is also generated per document.
     check orderCollection->createIndex({orderId: 1}, {unique: true, name: "uniq_order_id"});
+    // GET /orders?customerId= (customer history) and ?restaurantId= (kitchen board),
+    // both sorted newest first - compound indexes serve the filter and the sort.
+    check orderCollection->createIndex({customerId: 1, createdAt: -1}, {name: "idx_customer_created"});
+    check orderCollection->createIndex({restaurantId: 1, createdAt: -1}, {name: "idx_restaurant_created"});
     log:printInfo("Connected to MongoDB", database = mongoDatabase, host = mongoHost, port = mongoPort);
 }
 
@@ -80,4 +84,8 @@ public isolated function applyStatusTransition(string orderId, lifecycle:OrderSt
         return error(string `Order ${orderId} not found, or its status changed concurrently ` +
                 string `(expected ${previousStatus})`);
     }
+}
+
+public isolated function setCancellationReason(string orderId, string reason) returns error? {
+    _ = check orderCollection->updateOne({orderId: orderId}, {set: {cancellationReason: reason}});
 }

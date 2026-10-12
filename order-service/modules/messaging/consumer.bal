@@ -12,6 +12,7 @@ configurable string eventConsumerGroupId = "order-service-event-consumer";
 // Agreed payments.completed / restaurant.status / delivery values.
 const string PAYMENT_SUCCESS = "SUCCESS";
 const string RESTAURANT_ACKNOWLEDGED = "ACKNOWLEDGED";
+const string RESTAURANT_REJECTED = "REJECTED";
 const string DELIVERY_PICKED_UP = "PICKED_UP";
 const string DELIVERY_DELIVERED = "DELIVERED";
 
@@ -91,14 +92,28 @@ isolated function handlePaymentCompleted(string payload) returns error? {
 isolated function handleRestaurantStatus(string payload) returns error? {
     RestaurantStatusEvent event = check payload.fromJsonStringWithType(RestaurantStatusEvent);
 
-    if event.status != RESTAURANT_ACKNOWLEDGED {
-        log:printInfo("Ignoring restaurant status", orderId = event.orderId, status = event.status);
-        return;
-    }
-
     lifecycle:Order? existing = check store:findOrderById(event.orderId);
     if existing is () {
         log:printWarn("Received restaurant.status for unknown order", orderId = event.orderId);
+        return;
+    }
+
+    if event.status == RESTAURANT_REJECTED {
+        // The kitchen can't fulfil it (closed, out of stock, ...). Cancelling publishes
+        // orders.status_updated, which triggers the refund and cancels any delivery.
+        if existing.status != lifecycle:CREATED && existing.status != lifecycle:CONFIRMED {
+            log:printInfo("Ignoring rejection, order already in progress", orderId = event.orderId,
+                    currentStatus = existing.status);
+            return;
+        }
+        string reason = event?.reason ?: "Rejected by the restaurant";
+        check store:setCancellationReason(event.orderId, reason);
+        check advance(event.orderId, existing.status, lifecycle:CANCELLED);
+        return;
+    }
+
+    if event.status != RESTAURANT_ACKNOWLEDGED {
+        log:printInfo("Ignoring restaurant status", orderId = event.orderId, status = event.status);
         return;
     }
     if existing.status != lifecycle:CREATED {
