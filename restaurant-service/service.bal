@@ -71,10 +71,13 @@ service /restaurants on restaurantListener {
         return loadRestaurant(restaurantId);
     }
 
-    resource function delete [string restaurantId]() returns http:Ok|http:InternalServerError {
-        error? deleteResult = store:deleteRestaurant(restaurantId);
-        if deleteResult is error {
+    resource function delete [string restaurantId]() returns http:Ok|http:NotFound|http:InternalServerError {
+        boolean|error deleted = store:deleteRestaurant(restaurantId);
+        if deleted is error {
             return <http:InternalServerError>{body: {message: "Failed to delete restaurant"}};
+        }
+        if !deleted {
+            return restaurantNotFound(restaurantId);
         }
         return <http:Ok>{};
     }
@@ -101,6 +104,20 @@ service /restaurants on restaurantListener {
         return loadRestaurant(restaurantId);
     }
 
+    // Pause (false) or resume (true) taking orders, e.g. when the kitchen is overwhelmed.
+    resource function put [string restaurantId]/availability(restaurant:UpdateAvailabilityRequest req)
+            returns restaurant:Restaurant|http:NotFound|http:InternalServerError {
+        restaurant:Restaurant|http:NotFound|http:InternalServerError existing = loadRestaurant(restaurantId);
+        if existing is http:NotFound || existing is http:InternalServerError {
+            return existing;
+        }
+        error? updateResult = store:setRestaurantOpen(restaurantId, req.isOpen, time:utcToString(time:utcNow()));
+        if updateResult is error {
+            return <http:InternalServerError>{body: {message: "Failed to update availability"}};
+        }
+        return loadRestaurant(restaurantId);
+    }
+
     resource function get [string restaurantId]/menu() returns restaurant:MenuItem[]|http:InternalServerError {
         restaurant:MenuItem[]|error result = store:findMenuByRestaurant(restaurantId);
         if result is error {
@@ -110,10 +127,15 @@ service /restaurants on restaurantListener {
     }
 
     resource function post [string restaurantId]/menu(restaurant:AddMenuItemRequest req)
-            returns restaurant:MenuItem|http:BadRequest|http:InternalServerError {
+            returns restaurant:MenuItem|http:BadRequest|http:NotFound|http:InternalServerError {
         restaurant:ValidationError? validationError = restaurant:validateAddMenuItem(req);
         if validationError is restaurant:ValidationError {
             return badRequest(validationError);
+        }
+
+        restaurant:Restaurant|http:NotFound|http:InternalServerError owner = loadRestaurant(restaurantId);
+        if owner is http:NotFound || owner is http:InternalServerError {
+            return owner;
         }
 
         restaurant:MenuItem newItem = {
@@ -141,23 +163,27 @@ service /restaurants on restaurantListener {
             return badRequest(validationError);
         }
 
-        restaurant:MenuItem|http:NotFound|http:InternalServerError existing = loadMenuItem(itemId);
+        restaurant:MenuItem|http:NotFound|http:InternalServerError existing = loadMenuItem(restaurantId, itemId);
         if existing is http:NotFound || existing is http:InternalServerError {
             return existing;
         }
 
-        error? updateResult = store:updateMenuItem(itemId, req);
+        error? updateResult = store:updateMenuItem(restaurantId, itemId, req);
         if updateResult is error {
             return <http:InternalServerError>{body: {message: "Failed to update menu item"}};
         }
 
-        return loadMenuItem(itemId);
+        return loadMenuItem(restaurantId, itemId);
     }
 
-    resource function delete [string restaurantId]/menu/[string itemId]() returns http:Ok|http:InternalServerError {
-        error? deleteResult = store:deleteMenuItem(itemId);
-        if deleteResult is error {
+    resource function delete [string restaurantId]/menu/[string itemId]()
+            returns http:Ok|http:NotFound|http:InternalServerError {
+        boolean|error deleted = store:deleteMenuItem(restaurantId, itemId);
+        if deleted is error {
             return <http:InternalServerError>{body: {message: "Failed to delete menu item"}};
+        }
+        if !deleted {
+            return itemNotFound(itemId);
         }
         return <http:Ok>{};
     }
@@ -188,8 +214,9 @@ function loadRestaurant(string restaurantId) returns restaurant:Restaurant|http:
     return result;
 }
 
-function loadMenuItem(string itemId) returns restaurant:MenuItem|http:NotFound|http:InternalServerError {
-    restaurant:MenuItem|error? result = store:findMenuItemById(itemId);
+function loadMenuItem(string restaurantId, string itemId)
+        returns restaurant:MenuItem|http:NotFound|http:InternalServerError {
+    restaurant:MenuItem|error? result = store:findMenuItem(restaurantId, itemId);
     if result is error {
         return <http:InternalServerError>{body: {message: "Failed to load menu item"}};
     }

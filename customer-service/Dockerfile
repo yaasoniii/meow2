@@ -1,4 +1,7 @@
 FROM ballerina/ballerina:2201.13.5 AS build
+# The image defaults to a non-root user that cannot write to /app; only this
+# throwaway build stage runs as root - the runtime stage below does not.
+USER root
 WORKDIR /app
 COPY . .
 RUN bal build

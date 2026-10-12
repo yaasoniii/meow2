@@ -1,4 +1,9 @@
-kafkaBootstrap = "kafka:9092"
+[dsa612s.payment_service]
+servicePort = 8084
+kafkaBootstrapServers = "kafka:9092"
+# Share of simulated payments that succeed (0-100).
+successRatePercent = 85
+
 dbHost = "payment-db"
 dbPort = 5432
 dbName = "payments"

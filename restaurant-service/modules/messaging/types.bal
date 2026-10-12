@@ -23,6 +23,7 @@ public type OrderCreatedEvent record {
 public type RestaurantStatusEvent record {|
     string restaurantId;
     string orderId;
-    string status;
+    string status; // "ACKNOWLEDGED" or "REJECTED"
+    string? reason; // set when REJECTED
     string timestamp;
 |};

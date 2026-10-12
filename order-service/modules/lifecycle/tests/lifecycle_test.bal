@@ -100,3 +100,47 @@ function testComputeOrderTotalEmptyListIsZero() {
     OrderItem[] items = [];
     test:assertEquals(computeOrderTotal(items), 0d);
 }
+
+// ---------- validateCreateOrder ----------
+
+function validOrderRequest() returns CreateOrderRequest => {
+    customerId: "cust-1",
+    restaurantId: "rest-1",
+    items: [{itemId: "item-1", name: "Pizza", quantity: 2, unitPrice: 9.99}]
+};
+
+@test:Config {}
+function testValidateCreateOrderAcceptsAGoodRequest() {
+    test:assertEquals(validateCreateOrder(validOrderRequest()), ());
+}
+
+function invalidOrderProvider() returns [string, CreateOrderRequest][] {
+    CreateOrderRequest noCustomer = validOrderRequest();
+    noCustomer.customerId = " ";
+    CreateOrderRequest noRestaurant = validOrderRequest();
+    noRestaurant.restaurantId = "";
+    CreateOrderRequest noItems = validOrderRequest();
+    noItems.items = [];
+    CreateOrderRequest zeroQuantity = validOrderRequest();
+    zeroQuantity.items[0].quantity = 0;
+    CreateOrderRequest hugeQuantity = validOrderRequest();
+    hugeQuantity.items[0].quantity = MAX_ITEM_QUANTITY + 1;
+    CreateOrderRequest freeItem = validOrderRequest();
+    freeItem.items[0].unitPrice = 0;
+    CreateOrderRequest blankItem = validOrderRequest();
+    blankItem.items[0].itemId = "";
+    return [
+        ["blank customerId", noCustomer],
+        ["blank restaurantId", noRestaurant],
+        ["no items", noItems],
+        ["zero quantity", zeroQuantity],
+        ["quantity above the maximum", hugeQuantity],
+        ["zero price", freeItem],
+        ["blank itemId", blankItem]
+    ];
+}
+
+@test:Config {dataProvider: invalidOrderProvider}
+function testValidateCreateOrderRejects(string description, CreateOrderRequest req) {
+    test:assertTrue(validateCreateOrder(req) is string, "expected rejection for " + description);
+}

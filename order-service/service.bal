@@ -8,14 +8,22 @@ import dsa612s/order_service.store;
 
 configurable int servicePort = 8081;
 
+listener http:Listener orderListener = new (servicePort);
+
+type HealthStatus record {|
+    string status;
+    string[] consumedTopics;
+|};
+
 // ---------- REST API ----------
-service /orders on new http:Listener(servicePort) {
+service /orders on orderListener {
 
     // Create a new order -> CREATED, persists to MongoDB, publishes orders.created
     resource function post .(lifecycle:CreateOrderRequest req)
             returns lifecycle:Order|http:BadRequest|http:InternalServerError {
-        if req.items.length() == 0 {
-            return <http:BadRequest>{body: {message: "Order must contain at least one item"}};
+        string? invalid = lifecycle:validateCreateOrder(req);
+        if invalid is string {
+            return <http:BadRequest>{body: {message: invalid}};
         }
 
         string id = uuid:createType1AsString();
@@ -60,9 +68,20 @@ service /orders on new http:Listener(servicePort) {
         return result;
     }
 
-    // List all orders (optionally add query filters by customerId/restaurantId later)
-    resource function get .() returns lifecycle:Order[]|http:InternalServerError {
-        lifecycle:Order[]|error result = store:findAllOrders();
+    // List orders, newest first. Optional ?customerId= / ?restaurantId= / ?status= filters.
+    resource function get .(string? customerId = (), string? restaurantId = (), string? status = ())
+            returns lifecycle:Order[]|http:InternalServerError {
+        map<json> filter = {};
+        if customerId is string {
+            filter["customerId"] = customerId;
+        }
+        if restaurantId is string {
+            filter["restaurantId"] = restaurantId;
+        }
+        if status is string {
+            filter["status"] = status;
+        }
+        lifecycle:Order[]|error result = store:findOrders(filter);
         if result is error {
             log:printError("Failed to list orders", result);
             return <http:InternalServerError>{body: {message: "Failed to list orders"}};
@@ -110,5 +129,13 @@ service /orders on new http:Listener(servicePort) {
         current.status = req.status;
         current.updatedAt = now;
         return current;
+    }
+}
+
+// Separate base path so "health" can never be mistaken for an orderId.
+service /health on orderListener {
+
+    resource function get .() returns HealthStatus {
+        return {status: "UP", consumedTopics: messaging:consumedTopics()};
     }
 }

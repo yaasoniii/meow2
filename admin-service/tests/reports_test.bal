@@ -1,3 +1,5 @@
+import ballerina/test;
+
 function sampleOrders() returns OrderRecord[] => [
     {orderId: "o1", restaurantId: "r1", totalAmount: 100.00, createdAt: "2026-10-05T12:00:00Z", deliveredAt: "2026-10-05T12:30:00Z"},
     {orderId: "o2", restaurantId: "r1", totalAmount: 50.00, createdAt: "2026-10-05T13:00:00Z", deliveredAt: "2026-10-05T13:20:00Z"},
@@ -66,4 +68,30 @@ function testMinutesBetween() {
     test:assertEquals(minutesBetween("2026-10-05T12:00:00Z", "2026-10-05T12:01:30Z"), 1.5d);
     test:assertEquals(minutesBetween((), "2026-10-05T12:30:00Z"), ());
     test:assertEquals(minutesBetween("2026-10-05T12:30:00Z", "2026-10-05T12:00:00Z"), ());
+}
+@test:Config {}
+function testPlatformStats() {
+    OrderRecord[] orders = [
+        {orderId: "o1", status: "DELIVERED", paymentStatus: "SUCCESS", driverId: "d1", totalAmount: 100.00,
+            createdAt: "2026-10-05T12:00:00Z", deliveredAt: "2026-10-05T12:30:00Z"},
+        {orderId: "o2", status: "PREPARING", paymentStatus: "SUCCESS", driverId: "d2", totalAmount: 50.00,
+            createdAt: "2026-10-05T13:00:00Z"},
+        {orderId: "o3", status: "CREATED", paymentStatus: "FAILED", totalAmount: 30.00,
+            createdAt: "2026-10-05T14:00:00Z"},
+        {orderId: "o4", status: "CANCELLED", totalAmount: 20.00,
+            createdAt: "2026-10-05T15:00:00Z", cancelledAt: "2026-10-05T15:05:00Z"},
+        {orderId: "x1", status: "PREPARING"} // no orders.created yet - ignored
+    ];
+    PlatformStats stats = buildStats(orders);
+
+    test:assertEquals(stats.totalOrders, 4);
+    test:assertEquals(stats.ordersByStatus, {"DELIVERED": 1, "PREPARING": 1, "CREATED": 1, "CANCELLED": 1});
+    test:assertEquals(stats.activeOrders, 2);
+    test:assertEquals(stats.deliveredRevenue, 100.00d);
+    test:assertEquals(stats.averageOrderValue, 50.00d);
+    test:assertEquals(stats.paymentsSucceeded, 2);
+    test:assertEquals(stats.paymentsFailed, 1);
+    test:assertEquals(stats.driversAssigned, 2);
+    test:assertEquals(stats.completedDeliveries, 1);
+    test:assertEquals(stats.averageDeliveryMinutes, 30.00d);
 }

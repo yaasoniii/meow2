@@ -5,6 +5,7 @@ import ballerinax/kafka;
 configurable string kafkaBootstrapServers = "kafka:9092";
 configurable string deliveryAssignedTopic = "delivery.assigned";
 configurable string deliveryCompletedTopic = "delivery.completed";
+configurable string deliveryStatusUpdatedTopic = "delivery.status_updated";
 
 final kafka:Producer deliveryProducer = check new (kafkaBootstrapServers, {
     clientId: "delivery-service-producer",
@@ -12,7 +13,7 @@ final kafka:Producer deliveryProducer = check new (kafkaBootstrapServers, {
     retryCount: 3
 });
 
-public isolated function publishDeliveryAssigned(string deliveryId, string orderId, string driverId) returns error?{
+public isolated function publishDeliveryAssigned(string deliveryId, string orderId, string driverId) returns error? {
     DeliveryAssignedEvent event = {
         deliveryId: deliveryId,
         orderId: orderId,
@@ -21,14 +22,14 @@ public isolated function publishDeliveryAssigned(string deliveryId, string order
     };
     check deliveryProducer->send({
         topic: deliveryAssignedTopic,
-        key:  orderId.toBytes(),
-        value:  event.toJsonString().toBytes()
+        key: orderId.toBytes(),
+        value: event.toJsonString().toBytes()
     });
-    log:printInfo("Published delivery.assigned", deliveryId = deliveryId, orderId = orderId, driveId = driverId);
+    log:printInfo("Published delivery.assigned", deliveryId = deliveryId, orderId = orderId, driverId = driverId);
 }
 
-public isolated function pubishDeliveryCompleted(string deliveryId, string orderId, string driverId) returns error? {
-    DeliveryCompletedEvent event ={
+public isolated function publishDeliveryCompleted(string deliveryId, string orderId, string driverId) returns error? {
+    DeliveryCompletedEvent event = {
         deliveryId: deliveryId,
         orderId: orderId,
         driverId: driverId,
@@ -37,7 +38,26 @@ public isolated function pubishDeliveryCompleted(string deliveryId, string order
     check deliveryProducer->send({
         topic: deliveryCompletedTopic,
         key: orderId.toBytes(),
-        value:  event.toJsonString().toBytes()
+        value: event.toJsonString().toBytes()
     });
     log:printInfo("Published delivery.completed", deliveryId = deliveryId, orderId = orderId, driverId = driverId);
+}
+
+public isolated function publishDeliveryStatusUpdated(string deliveryId, string orderId, string? driverId,
+        string previousStatus, string newStatus) returns error? {
+    DeliveryStatusUpdatedEvent event = {
+        deliveryId: deliveryId,
+        orderId: orderId,
+        driverId: driverId,
+        previousStatus: previousStatus,
+        newStatus: newStatus,
+        timestamp: time:utcToString(time:utcNow())
+    };
+    check deliveryProducer->send({
+        topic: deliveryStatusUpdatedTopic,
+        key: orderId.toBytes(),
+        value: event.toJsonString().toBytes()
+    });
+    log:printInfo("Published delivery.status_updated", deliveryId = deliveryId, orderId = orderId,
+            newStatus = newStatus);
 }

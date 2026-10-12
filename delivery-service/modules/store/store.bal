@@ -41,6 +41,11 @@ function init() returns error? {
     //One delivery per order
      // safe: the second insert fails instead of creating a duplicate delivery.
     check deliveryCollection->createIndex({orderId: 1}, {unique: true, name: "uniq_order_id"});
+    // Dispatch looks for free drivers and waiting deliveries (oldest first);
+    // the driver app lists a driver's own deliveries.
+    check driverCollection->createIndex({status: 1}, {name: "idx_driver_status"});
+    check deliveryCollection->createIndex({status: 1, createdAt: 1}, {name: "idx_status_created"});
+    check deliveryCollection->createIndex({driverId: 1, createdAt: -1}, {name: "idx_driver_created"});
 
     log:printInfo("Connected to MongoDB", database = mongoDatabase, host = mongoHost, port = mongoPort);
 }
@@ -71,6 +76,17 @@ public isolated function fetchAvailableDrivers() returns domain:Driver[]|error {
     return drivers;
 }
 
+// Claims a driver for a delivery in a single atomic update. The filter includes
+// status: AVAILABLE, so if two deliveries race for the same driver only one
+// update matches - the loser gets false and moves on to another driver.
+public isolated function claimDriver(string driverId, string deliveryId) returns boolean|error {
+    mongodb:UpdateResult result = check driverCollection->updateOne(
+        {driverId: driverId, status: domain:AVAILABLE},
+        {set: {status: domain:ON_DELIVERY, currentDeliveryId: deliveryId}}
+    );
+    return result.matchedCount > 0;
+}
+
 public isolated function updateDriverStatus(string driverId, domain:DriverStatus status,
         string? currentDeliveryId) returns error? {
     mongodb:UpdateResult result = check driverCollection->updateOne(
@@ -96,8 +112,19 @@ public isolated function findDeliveryByOrderId(string orderId) returns domain:De
     return check deliveryCollection->findOne({orderId: orderId});
 }
 
-public isolated function findAllDeliveries() returns domain:Delivery[]|error {
-    stream<domain:Delivery, error?> resultStream = check deliveryCollection->find({});
+// Newest first. `filter` is a plain Mongo filter, e.g. {driverId: "..."}.
+public isolated function findDeliveries(map<json> filter) returns domain:Delivery[]|error {
+    stream<domain:Delivery, error?> resultStream = check deliveryCollection->find(filter, {sort: {createdAt: -1}});
+    domain:Delivery[] deliveries = check from domain:Delivery d in resultStream
+        select d;
+    check resultStream.close();
+    return deliveries;
+}
+
+// Oldest first, so waiting deliveries get drivers in the order they were paid for.
+public isolated function findPendingDeliveries() returns domain:Delivery[]|error {
+    stream<domain:Delivery, error?> resultStream =
+        check deliveryCollection->find({status: domain:PENDING}, {sort: {createdAt: 1}});
     domain:Delivery[] deliveries = check from domain:Delivery d in resultStream
         select d;
     check resultStream.close();

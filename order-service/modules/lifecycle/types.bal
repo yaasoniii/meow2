@@ -26,6 +26,12 @@ public type Order record {|
     OrderItem[] items;
     decimal totalAmount;
     OrderStatus status;
+    // Last payments.completed outcome for this order ("SUCCESS" / "FAILED").
+    // Absent until the Payment Service has reported - optional so orders saved
+    // before this field existed still deserialise.
+    string paymentStatus?;
+    // Why the order was cancelled automatically (e.g. the restaurant rejected it).
+    string cancellationReason?;
     string createdAt;
     string updatedAt;
 |};
@@ -75,4 +81,31 @@ public isolated function computeOrderTotal(OrderItem[] items) returns decimal {
         total += item.unitPrice * <decimal>item.quantity;
     }
     return total;
+}
+
+public const int MAX_ITEM_QUANTITY = 50;
+
+// Returns a message describing the first problem, or () when the request is valid.
+public isolated function validateCreateOrder(CreateOrderRequest req) returns string? {
+    if req.customerId.trim() == "" {
+        return "customerId is required";
+    }
+    if req.restaurantId.trim() == "" {
+        return "restaurantId is required";
+    }
+    if req.items.length() == 0 {
+        return "Order must contain at least one item";
+    }
+    foreach OrderItem item in req.items {
+        if item.itemId.trim() == "" || item.name.trim() == "" {
+            return "Every item needs an itemId and a name";
+        }
+        if item.quantity < 1 || item.quantity > MAX_ITEM_QUANTITY {
+            return string `Quantity of ${item.name} must be between 1 and ${MAX_ITEM_QUANTITY}`;
+        }
+        if item.unitPrice <= 0d {
+            return string `Price of ${item.name} must be greater than zero`;
+        }
+    }
+    return ();
 }

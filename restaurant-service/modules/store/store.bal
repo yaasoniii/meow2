@@ -1,7 +1,8 @@
+import ballerina/log;
 import ballerinax/mongodb;
 import restaurant_service.restaurant;
 
-configurable string mongoHost = "localhost";
+configurable string mongoHost = "mongo";
 configurable int mongoPort = 27017;
 configurable string mongoDatabase = "restaurant_service";
 configurable string mongoUsername = "";
@@ -30,6 +31,13 @@ function buildConnectionConfig() returns mongodb:ConnectionConfig {
 }
 
 final mongodb:Client mongoClient = check new (buildConnectionConfig());
+
+// Runs once when the module initialises, so the unique indexes exist before the
+// first request or Kafka event touches either collection.
+function init() returns error? {
+    check ensureIndexes();
+    log:printInfo("Connected to MongoDB", database = mongoDatabase, host = mongoHost, port = mongoPort);
+}
 
 function restaurantsCollection() returns mongodb:Collection|error {
     mongodb:Database db = check mongoClient->getDatabase(mongoDatabase);
@@ -94,12 +102,17 @@ public function updateRestaurantHours(string restaurantId, restaurant:OpeningHou
     _ = check restaurants->updateOne({restaurantId: restaurantId}, update);
 }
 
-public function deleteRestaurant(string restaurantId) returns error? {
+// Returns false when there was no such restaurant, so the caller can answer 404.
+public function deleteRestaurant(string restaurantId) returns boolean|error {
     mongodb:Collection restaurants = check restaurantsCollection();
-    _ = check restaurants->deleteOne({restaurantId: restaurantId});
+    mongodb:DeleteResult result = check restaurants->deleteOne({restaurantId: restaurantId});
+    if result.deletedCount == 0 {
+        return false;
+    }
 
     mongodb:Collection menuItems = check menuItemsCollection();
     _ = check menuItems->deleteMany({restaurantId: restaurantId});
+    return true;
 }
 
 public function saveMenuItem(restaurant:MenuItem item) returns error? {
@@ -107,9 +120,11 @@ public function saveMenuItem(restaurant:MenuItem item) returns error? {
     check menuItems->insertOne(item);
 }
 
-public function findMenuItemById(string itemId) returns restaurant:MenuItem|error? {
+// Scoped by restaurant as well as item, so one restaurant can never read (and
+// therefore edit or delete) another restaurant's menu item.
+public function findMenuItem(string restaurantId, string itemId) returns restaurant:MenuItem|error? {
     mongodb:Collection menuItems = check menuItemsCollection();
-    return check menuItems->findOne({itemId: itemId});
+    return check menuItems->findOne({restaurantId: restaurantId, itemId: itemId});
 }
 
 public function findMenuByRestaurant(string restaurantId) returns restaurant:MenuItem[]|error {
@@ -122,7 +137,8 @@ public function findMenuByRestaurant(string restaurantId) returns restaurant:Men
     return results;
 }
 
-public function updateMenuItem(string itemId, restaurant:UpdateMenuItemRequest req) returns error? {
+public function updateMenuItem(string restaurantId, string itemId, restaurant:UpdateMenuItemRequest req)
+        returns error? {
     mongodb:Collection menuItems = check menuItemsCollection();
 
     map<json> setFields = {};
@@ -152,37 +168,37 @@ public function updateMenuItem(string itemId, restaurant:UpdateMenuItemRequest r
     }
 
     mongodb:Update update = {set: setFields};
-    _ = check menuItems->updateOne({itemId: itemId}, update);
+    _ = check menuItems->updateOne({restaurantId: restaurantId, itemId: itemId}, update);
 }
 
-public function deleteMenuItem(string itemId) returns error? {
+// Returns false when the item doesn't exist for that restaurant (-> 404).
+public function deleteMenuItem(string restaurantId, string itemId) returns boolean|error {
     mongodb:Collection menuItems = check menuItemsCollection();
-    _ = check menuItems->deleteOne({itemId: itemId});
+    mongodb:DeleteResult result = check menuItems->deleteOne({restaurantId: restaurantId, itemId: itemId});
+    return result.deletedCount > 0;
 }
 
-// Called only by the Kafka consumer when an order comes in. Floors stock
-// at 0 and auto-marks the item unavailable once it hits 0. Returns false
-// (not an error) when the item doesn't belong to this restaurant, so the
-// consumer can log-and-continue instead of failing the whole batch.
+// Called by the Kafka consumer once an order has been accepted. The stock
+// check and the decrement are one atomic update (the filter requires enough
+// stock), so stock can never go negative even if two orders race. Returns
+// false when there wasn't enough stock (or no such item).
 public function decrementStock(string restaurantId, string itemId, int quantity) returns boolean|error {
     mongodb:Collection menuItems = check menuItemsCollection();
-    restaurant:MenuItem? item = check menuItems->findOne({itemId: itemId, restaurantId: restaurantId});
-
-    if item is () {
+    mongodb:UpdateResult result = check menuItems->updateOne(
+        {itemId: itemId, restaurantId: restaurantId, stockCount: {"$gte": quantity}},
+        {inc: {stockCount: -quantity}}
+    );
+    if result.matchedCount == 0 {
         return false;
     }
-
-    int newStock = item.stockCount - quantity;
-    if newStock < 0 {
-        newStock = 0;
-    }
-
-    mongodb:Update update = {
-        set: {
-            stockCount: newStock,
-            available: newStock > 0
-        }
-    };
-    _ = check menuItems->updateOne({itemId: itemId}, update);
+    // Sold out -> hide it from the menu.
+    _ = check menuItems->updateOne({itemId: itemId, restaurantId: restaurantId, stockCount: {"$lte": 0}},
+            {set: {available: false}});
     return true;
+}
+
+// Pause / resume accepting orders, independent of opening hours.
+public function setRestaurantOpen(string restaurantId, boolean isOpen, string updatedAt) returns error? {
+    mongodb:Collection restaurants = check restaurantsCollection();
+    _ = check restaurants->updateOne({restaurantId: restaurantId}, {set: {isOpen: isOpen, updatedAt: updatedAt}});
 }

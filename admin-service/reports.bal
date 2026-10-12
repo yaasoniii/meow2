@@ -1,12 +1,32 @@
 import ballerina/time;
 
+// One order as pieced together from events. Every field except orderId is
+// optional because the events can arrive in any order across topics.
 type OrderRecord record {|
     string orderId;
     string restaurantId?;
+    string customerId?;
     decimal totalAmount?;
+    string status?;
+    string paymentStatus?;
+    string driverId?;
     string createdAt?;
+    string updatedAt?;
     string deliveredAt?;
     string cancelledAt?;
+|};
+
+type PlatformStats record {|
+    int totalOrders;
+    map<int> ordersByStatus;
+    int activeOrders; // not yet delivered or cancelled
+    decimal deliveredRevenue; // total of delivered orders
+    decimal averageOrderValue;
+    int paymentsSucceeded;
+    int paymentsFailed;
+    int driversAssigned; // orders that have had a driver assigned
+    int completedDeliveries;
+    decimal? averageDeliveryMinutes;
 |};
 
 type RestaurantStats record {|
@@ -49,6 +69,55 @@ function buildReport(string reportId, string generatedAt, OrderRecord[] allOrder
         restaurants: restaurantStats(orders),
         deliveries: deliveryStats(orders),
         cancellations: cancellationStats(orders)
+    };
+}
+
+function buildStats(OrderRecord[] allOrders) returns PlatformStats {
+    OrderRecord[] orders = from OrderRecord o in allOrders
+        where o?.createdAt is string
+        select o;
+
+    map<int> byStatus = {};
+    int active = 0;
+    decimal orderValueTotal = 0;
+    int succeeded = 0;
+    int failed = 0;
+    int assigned = 0;
+    foreach OrderRecord o in orders {
+        string status = o?.status ?: "UNKNOWN";
+        byStatus[status] = (byStatus[status] ?: 0) + 1;
+        if !isCancelled(o) && !isDelivered(o) {
+            active += 1;
+        }
+        orderValueTotal += o?.totalAmount ?: 0.0d;
+        if o?.paymentStatus == "SUCCESS" {
+            succeeded += 1;
+        } else if o?.paymentStatus == "FAILED" {
+            failed += 1;
+        }
+        if o?.driverId is string {
+            assigned += 1;
+        }
+    }
+
+    RestaurantStats[] perRestaurant = restaurantStats(orders);
+    decimal revenue = 0;
+    foreach RestaurantStats r in perRestaurant {
+        revenue += r.revenue;
+    }
+    DeliveryStats deliveries = deliveryStats(orders);
+
+    return {
+        totalOrders: orders.length(),
+        ordersByStatus: byStatus,
+        activeOrders: active,
+        deliveredRevenue: revenue,
+        averageOrderValue: orders.length() > 0 ? (orderValueTotal / <decimal>orders.length()).round(2) : 0,
+        paymentsSucceeded: succeeded,
+        paymentsFailed: failed,
+        driversAssigned: assigned,
+        completedDeliveries: deliveries.completedDeliveries,
+        averageDeliveryMinutes: deliveries.averageMinutes
     };
 }
 
