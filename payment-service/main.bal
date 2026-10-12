@@ -14,7 +14,8 @@ configurable decimal successRatePercent = 85;
 public enum PaymentStatus {
     PENDING,
     SUCCESS,
-    FAILED
+    FAILED,
+    REFUNDED // a SUCCESS payment whose order was later cancelled
 }
 
 public type Payment record {|
@@ -41,8 +42,14 @@ public type OrderCreatedEvent record {
     decimal totalAmount;
 };
 
+// orders.status_updated - only CANCELLED matters here (it triggers a refund).
+public type OrderStatusUpdatedEvent record {
+    string orderId;
+    string newStatus;
+};
+
 // payments.completed - the shared contract (see the root README). status is
-// "SUCCESS" or "FAILED".
+// "SUCCESS", "FAILED" or "REFUNDED".
 public type PaymentCompletedEvent record {|
     string orderId;
     string paymentId;
@@ -135,10 +142,33 @@ function hasSuccessfulPayment(string orderId) returns boolean|error {
     return existing.some(p => p.status == SUCCESS);
 }
 
+// Cancelled orders are remembered so a charge can never happen after the
+// cancellation - the two arrive on different topics, in either order.
+function markOrderCancelled(string orderId) returns error? {
+    _ = check paymentDb->execute(`
+        INSERT INTO cancelled_orders (order_id) VALUES (${orderId}::uuid) ON CONFLICT DO NOTHING
+    `);
+}
+
+function isOrderCancelled(string orderId) returns boolean|error {
+    int count = check paymentDb->queryRow(`
+        SELECT COUNT(*) FROM cancelled_orders WHERE order_id = ${orderId}::uuid
+    `);
+    return count > 0;
+}
+
+function markRefunded(string paymentId, string updatedAt) returns error? {
+    _ = check paymentDb->execute(`
+        UPDATE payments SET status = 'REFUNDED', updated_at = ${updatedAt}::timestamptz
+        WHERE payment_id = ${paymentId}::uuid AND status = 'SUCCESS'
+    `);
+}
+
 // ---------- Kafka ----------
 
 configurable string kafkaBootstrapServers = "kafka:9092";
 const string ORDERS_TOPIC = "orders.created";
+const string ORDER_STATUS_TOPIC = "orders.status_updated";
 const string PAYMENTS_TOPIC = "payments.completed";
 
 final kafka:Producer paymentsProducer = check new (kafkaBootstrapServers, {
@@ -151,7 +181,7 @@ final kafka:Producer paymentsProducer = check new (kafkaBootstrapServers, {
 // a batch has been handled, so a crash replays it instead of losing it.
 listener kafka:Listener orderListener = new (kafkaBootstrapServers, {
     groupId: "payment-service-group",
-    topics: [ORDERS_TOPIC],
+    topics: [ORDERS_TOPIC, ORDER_STATUS_TOPIC],
     offsetReset: kafka:OFFSET_RESET_EARLIEST,
     autoCommit: false
 });
@@ -197,14 +227,15 @@ function publishPaymentCompleted(Payment payment) returns error? {
 service on orderListener {
     remote function onConsumerRecord(kafka:Caller caller, kafka:BytesConsumerRecord[] records) returns error? {
         foreach kafka:BytesConsumerRecord rec in records {
-            error? result = handleOrderCreated(rec);
+            string topic = rec.offset.partition.topic;
+            error? result = topic == ORDER_STATUS_TOPIC ? handleOrderStatusUpdated(rec) : handleOrderCreated(rec);
             if result is error {
-                log:printError("Failed to process orders.created record", result);
+                log:printError("Failed to process order event", result, topic = topic);
             }
         }
         kafka:Error? commitResult = caller->commit();
         if commitResult is kafka:Error {
-            log:printError("Failed to commit orders.created offsets", commitResult);
+            log:printError("Failed to commit order event offsets", commitResult);
         }
     }
 }
@@ -214,6 +245,14 @@ function handleOrderCreated(kafka:BytesConsumerRecord rec) returns error? {
     OrderCreatedEvent orderEvent = check msg.fromJsonStringWithType();
     log:printInfo("Received orders.created", orderId = orderEvent.orderId);
 
+    if !uuid:validate(orderEvent.orderId) || !uuid:validate(orderEvent.customerId) {
+        log:printWarn("Skipping order with non-UUID ids", orderId = orderEvent.orderId);
+        return;
+    }
+    if check isOrderCancelled(orderEvent.orderId) {
+        log:printInfo("Order was cancelled before payment, not charging", orderId = orderEvent.orderId);
+        return;
+    }
     // Kafka is at-least-once: a redelivered orders.created must not charge twice.
     if check hasSuccessfulPayment(orderEvent.orderId) {
         log:printInfo("Order already paid, skipping", orderId = orderEvent.orderId);
@@ -222,6 +261,29 @@ function handleOrderCreated(kafka:BytesConsumerRecord rec) returns error? {
 
     Payment payment = check processPayment(orderEvent.orderId, orderEvent.customerId, orderEvent.totalAmount);
     check publishPaymentCompleted(payment);
+}
+
+// A cancelled order is refunded (simulated) and can no longer be charged.
+function handleOrderStatusUpdated(kafka:BytesConsumerRecord rec) returns error? {
+    string msg = check string:fromBytes(rec.value);
+    OrderStatusUpdatedEvent event = check msg.fromJsonStringWithType();
+    if event.newStatus != "CANCELLED" || !uuid:validate(event.orderId) {
+        return;
+    }
+
+    check markOrderCancelled(event.orderId);
+    foreach Payment payment in check findPaymentsByOrderId(event.orderId) {
+        if payment.status == SUCCESS {
+            string now = time:utcToString(time:utcNow());
+            check markRefunded(payment.paymentId, now);
+            Payment refunded = payment.clone();
+            refunded.status = REFUNDED;
+            refunded.updatedAt = now;
+            check publishPaymentCompleted(refunded);
+            log:printInfo("Refunded payment for cancelled order", orderId = event.orderId,
+                    paymentId = payment.paymentId);
+        }
+    }
 }
 
 // ---------- REST API ----------
@@ -239,6 +301,15 @@ service /payments on new http:Listener(servicePort) {
             return <http:BadRequest>{body: {message: "amount must be greater than zero"}};
         }
 
+        boolean|error cancelled = isOrderCancelled(req.orderId);
+        if cancelled is error {
+            log:printError("DB lookup failed", cancelled);
+            return <http:InternalServerError>{body: {message: "failed to process payment"}};
+        }
+        if cancelled {
+            return <http:Conflict>{body: {message: "order " + req.orderId + " was cancelled"}};
+        }
+
         boolean|error alreadyPaid = hasSuccessfulPayment(req.orderId);
         if alreadyPaid is error {
             log:printError("DB lookup failed", alreadyPaid);
@@ -249,6 +320,10 @@ service /payments on new http:Listener(servicePort) {
         }
 
         Payment|error payment = processPayment(req.orderId, req.customerId, req.amount);
+        if payment is error && payment.message().includes("uniq_payments_one_success_per_order") {
+            // Lost a race with a concurrent successful attempt - the DB index caught it.
+            return <http:Conflict>{body: {message: "order " + req.orderId + " is already paid"}};
+        }
         if payment is error {
             log:printError("Failed to process/persist payment", payment);
             return <http:InternalServerError>{body: {message: "failed to process payment"}};

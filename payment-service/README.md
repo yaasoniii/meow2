@@ -7,20 +7,22 @@ Simulated payment processing and payment-confirmation events for the food-delive
 ## Responsibilities
 - Consumes `orders.created` and charges the order automatically. The charge is simulated: `successRatePercent` in `Config.toml`, 85% by default, succeed.
 - Produces `payments.completed` for every attempt
+- Consumes `orders.status_updated`: when an order is **cancelled**, its successful payment is refunded and the order can no longer be charged
 - REST API to retry a failed payment and to look payments up
 - Owns the payment/transaction schema (see `db_schema.sql`)
 
 ## Endpoints (port 8084)
 | Method | Path | Description |
 |---|---|---|
-| POST | `/payments/initiate` | `{orderId, customerId, amount}`. Starts a payment, typically to retry a failed one. Returns 409 if the order is already paid, and 400 if the ids aren't UUIDs |
+| POST | `/payments/initiate` | `{orderId, customerId, amount}`. Starts a payment, typically to retry a failed one. Returns 409 if the order is already paid or was cancelled, and 400 if the ids aren't UUIDs or the amount isn't positive |
 | GET | `/payments/{paymentId}` | A single payment (404 if unknown) |
 | GET | `/payments/byOrder/{orderId}` | All payment attempts for an order |
 | GET | `/payments/health` | Health check |
 
 ## Kafka
 - Consumes: `orders.created` (uses `orderId`, `customerId`, `totalAmount`)
-- Produces: `payments.completed` `{orderId, paymentId, customerId, amount, status: "SUCCESS" | "FAILED", timestamp}`, keyed by `orderId`
+- Consumes: `orders.status_updated` (only `CANCELLED` matters)
+- Produces: `payments.completed` `{orderId, paymentId, customerId, amount, status: "SUCCESS" | "FAILED" | "REFUNDED", timestamp}`, keyed by `orderId`
 
 **Idempotent.** An order that already has a `SUCCESS` payment is never charged again, whether a redelivered `orders.created` or a manual retry triggers the attempt.
 
