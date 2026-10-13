@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Defense Walkthrough</title>
+<style>
+@page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+:root { --ink:#1b1f24; --mute:#5b6470; --line:#d9dee4; --accent:#c2410c; --accent-soft:#fff3ea; --blue:#1d4ed8; --blue-soft:#eef3ff; --green:#15803d; --green-soft:#ecfdf3; --code:#f4f5f7; }
+* { box-sizing:border-box; }
+body { font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif; color:var(--ink); font-size:10pt; line-height:1.45; margin:0; }
+h1 { font-size:24pt; margin:0 0 4mm; letter-spacing:-.3px; }
+h2 { font-size:15pt; margin:0 0 3mm; padding-bottom:1.5mm; border-bottom:2px solid var(--accent); }
+h3 { font-size:11.5pt; margin:5mm 0 2mm; color:var(--accent); }
+p { margin:0 0 2.5mm; }
+ul,ol { margin:0 0 3mm; padding-left:5.5mm; }
+li { margin-bottom:1mm; }
+code, .mono { font-family:"DejaVu Sans Mono", Menlo, monospace; font-size:8.6pt; background:var(--code); padding:0 1mm; border-radius:2px; }
+pre { font-family:"DejaVu Sans Mono", Menlo, monospace; font-size:8.2pt; background:var(--code); padding:3mm; border-radius:3px; margin:0 0 3mm; white-space:pre-wrap; line-height:1.4; border-left:3px solid var(--line); }
+table { width:100%; border-collapse:collapse; margin:0 0 3.5mm; font-size:9pt; }
+th, td { text-align:left; padding:1.6mm 2mm; border-bottom:1px solid var(--line); vertical-align:top; }
+th { background:#f7f8fa; font-weight:700; }
+tr.me td { background:var(--accent-soft); font-weight:600; }
+.page { page-break-after:always; }
+.page:last-child { page-break-after:auto; }
+.tag { display:inline-block; font-size:8pt; font-weight:700; padding:.6mm 2mm; border-radius:10px; background:var(--accent-soft); color:var(--accent); margin-right:1.5mm; }
+.say { background:var(--blue-soft); border-left:4px solid var(--blue); padding:2.5mm 3.5mm; margin:0 0 3.5mm; border-radius:2px; }
+.say b:first-child { color:var(--blue); }
+.tip { background:var(--green-soft); border-left:4px solid var(--green); padding:2.5mm 3.5mm; margin:0 0 3.5mm; border-radius:2px; }
+.warn { background:var(--accent-soft); border-left:4px solid var(--accent); padding:2.5mm 3.5mm; margin:0 0 3.5mm; border-radius:2px; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:5mm; }
+.mute { color:var(--mute); }
+.small { font-size:8.6pt; }
+.cover { height:255mm; display:flex; flex-direction:column; justify-content:space-between; }
+.cover .band { background:var(--ink); color:#fff; padding:12mm 10mm; border-radius:4px; }
+.cover .band h1 { color:#fff; font-size:28pt; }
+.cover .band .sub { color:#f6c7a8; font-size:12pt; }
+.qa { font-size:9.3pt; margin-bottom:2.4mm; page-break-inside:avoid; }
+.qa .q { font-weight:700; }
+.qa .q::before { content:"Q  "; color:var(--accent); }
+.qa .a::before { content:"A  "; color:var(--green); font-weight:700; }
+.step { display:flex; gap:3mm; margin-bottom:2.2mm; page-break-inside:avoid; }
+.step .n { flex:0 0 7mm; height:7mm; border-radius:50%; background:var(--accent); color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:9pt; }
+svg text { font-family:"DejaVu Sans", Arial, sans-serif; }
+.avoid { page-break-inside:avoid; }
+</style></head><body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div>
+    <div class="band">
+      <div class="sub">DSA612S · Distributed Food Delivery Platform</div>
+      <h1>Defense Walkthrough</h1>
+      <div style="font-size:13pt">Presenter: <b>Jason</b> — Order Service owner &amp; system integration</div>
+    </div>
+    <div style="margin-top:9mm">
+      <h3 style="margin-top:0">What this document is</h3>
+      <p>A speaking guide for today's defense. It walks the panel through the platform as a whole, then spends most of the time on <b>my part</b>: the <b>Order Service</b> (the central state machine every other service reacts to) and the <b>integration work</b> that made all seven services run together.</p>
+      <p>Blue boxes are things to <b>say</b>. Green boxes are tips for the <b>demo</b>. Orange boxes are <b>weaknesses to own</b> before the panel finds them.</p>
+      <h3>Contents</h3>
+      <ol>
+        <li>Running order &amp; timing</li>
+        <li>The system in one page</li>
+        <li>My part: Order Service — responsibilities &amp; structure</li>
+        <li>The order state machine</li>
+        <li>Event choreography: how orders move on their own</li>
+        <li>Data design &amp; consistency guarantees</li>
+        <li>REST API &amp; validation</li>
+        <li>Testing strategy</li>
+        <li>My integration work across the team</li>
+        <li>Live demo script</li>
+        <li>Expected questions &amp; answers</li>
+        <li>Limitations I'd fix next · code cheat-sheet</li>
+      </ol>
+    </div>
+  </div>
+  <table class="small">
+    <tr><th>Service</th><th>Owner</th><th>Port</th><th>Store</th></tr>
+    <tr class="me"><td>Order Service</td><td>Jason (me)</td><td>8081</td><td>MongoDB</td></tr>
+    <tr><td>Customer Service</td><td>—</td><td>8082</td><td>MongoDB</td></tr>
+    <tr><td>Restaurant Service</td><td>Renate</td><td>8083</td><td>MongoDB</td></tr>
+    <tr><td>Payment Service</td><td>Albert</td><td>8084</td><td>PostgreSQL</td></tr>
+    <tr><td>Delivery Service</td><td>Penny</td><td>8085</td><td>MongoDB</td></tr>
+    <tr><td>Notification Service</td><td>Gerson</td><td>8086</td><td>MongoDB</td></tr>
+    <tr><td>Admin Service</td><td>Celine</td><td>8087</td><td>MongoDB</td></tr>
+    <tr class="me"><td>Compose, Kafka topics, Web UI, smoke test, docs</td><td>Jason (integration)</td><td>3000</td><td>—</td></tr>
+  </table>
+</section>
+
+<!-- ============ 1 RUNNING ORDER ============ -->
+<section class="page">
+  <h2>1 · Running order &amp; timing</h2>
+  <p class="mute">Assumes roughly 15 minutes for my slot. Scale each block if the slot is shorter; never cut the demo.</p>
+  <table>
+    <tr><th style="width:14%">Time</th><th style="width:30%">Block</th><th>Key message</th></tr>
+    <tr><td>0:00–1:00</td><td>Opening</td><td>"Seven Ballerina microservices, talking only through Kafka. I own the Order Service, which is the heart of the order lifecycle, and I did the integration that runs them all together."</td></tr>
+    <tr><td>1:00–3:00</td><td>System in one page</td><td>Database per service, events not calls, keyed by <code>orderId</code>.</td></tr>
+    <tr class="me"><td>3:00–5:00</td><td>Order Service structure</td><td>Four modules, one-way dependencies, pure domain logic isolated for testing.</td></tr>
+    <tr class="me"><td>5:00–7:00</td><td>State machine</td><td>Seven statuses, explicit transitions, terminal states, why READY can't be cancelled.</td></tr>
+    <tr class="me"><td>7:00–9:30</td><td>Event choreography</td><td>Restaurant ACK and payment can arrive in either order; whichever is second advances the order.</td></tr>
+    <tr class="me"><td>9:30–11:00</td><td>Consistency</td><td>Optimistic concurrency, idempotent handlers, manual offset commit, <code>acks=all</code>.</td></tr>
+    <tr><td>11:00–14:00</td><td>Live demo</td><td>Happy path CREATED → DELIVERED, then a rejected order that is cancelled and refunded.</td></tr>
+    <tr><td>14:00–15:00</td><td>Close</td><td>Testing summary, honest limitations (dual write → outbox), questions.</td></tr>
+  </table>
+
+  <h3>Opening line (memorise this)</h3>
+  <div class="say"><b>Say:</b> "Our platform is a food-delivery system built as seven independent Ballerina microservices. They never call each other directly — every interaction is a Kafka event, and each service owns its own database. My part is the Order Service: it creates orders, owns the order's lifecycle, and moves each order forward automatically when the restaurant, payment and delivery services report back. I also wired the whole system together — Docker Compose, the Kafka topics, the web front-end and an end-to-end test — so I'll finish with a live demo of one order going all the way through."</div>
+
+  <h3>Before you walk in</h3>
+  <ul>
+    <li><code>docker compose up -d --build</code> at least 5 minutes early; wait for all containers to be <i>healthy</i>.</li>
+    <li>Open <b>http://localhost:3000 → System</b>, confirm all 7 health cards are green, click <b>Load demo data</b>.</li>
+    <li>Run <code>node scripts/smoke-test.mjs</code> once as a dress rehearsal — every line should read <code>PASS</code>.</li>
+    <li>Have <code>order-service/modules/messaging/consumer.bal</code> and <code>modules/lifecycle/types.bal</code> open in the editor.</li>
+    <li>Keep a terminal ready with <code>docker compose logs -f order-service</code> — the "Auto-advanced order" log lines are great evidence.</li>
+  </ul>
+</section>
+
+<!-- ============ 2 SYSTEM ============ -->
+<section class="page">
+  <h2>2 · The system in one page</h2>
+  <svg viewBox="0 0 720 300" width="100%" class="avoid">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6470"/></marker></defs>
+    <rect x="10" y="120" width="90" height="50" rx="6" fill="#f7f8fa" stroke="#5b6470"/>
+    <text x="55" y="142" text-anchor="middle" font-size="12" font-weight="700">Web UI</text>
+    <text x="55" y="158" text-anchor="middle" font-size="10" fill="#5b6470">nginx :3000</text>
+    <line x1="100" y1="145" x2="150" y2="145" stroke="#5b6470" marker-end="url(#ar)"/>
+    <text x="125" y="137" text-anchor="middle" font-size="9" fill="#5b6470">REST</text>
+    <!-- services -->
+    <g font-size="11">
+      <rect x="155" y="20" width="130" height="34" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="42" text-anchor="middle">Customer :8082</text>
+      <rect x="155" y="62" width="130" height="34" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="84" text-anchor="middle">Restaurant :8083</text>
+      <rect x="155" y="104" width="130" height="40" rx="5" fill="#fff3ea" stroke="#c2410c" stroke-width="2.5"/><text x="220" y="122" text-anchor="middle" font-weight="700" fill="#c2410c">ORDER :8081</text><text x="220" y="136" text-anchor="middle" font-size="9" fill="#c2410c">my service</text>
+      <rect x="155" y="152" width="130" height="34" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="174" text-anchor="middle">Payment :8084</text>
+      <rect x="155" y="194" width="130" height="34" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="216" text-anchor="middle">Delivery :8085</text>
+      <rect x="155" y="236" width="130" height="34" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="258" text-anchor="middle">Notification :8086</text>
+      <rect x="155" y="278" width="130" height="20" rx="5" fill="#fff" stroke="#5b6470"/><text x="220" y="292" text-anchor="middle" font-size="10">Admin :8087</text>
+    </g>
+    <!-- kafka -->
+    <rect x="360" y="95" width="150" height="110" rx="10" fill="#111827"/>
+    <text x="435" y="130" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">Kafka</text>
+    <text x="435" y="150" text-anchor="middle" font-size="10" fill="#f6c7a8">7 topics · 3 partitions</text>
+    <text x="435" y="166" text-anchor="middle" font-size="10" fill="#f6c7a8">key = orderId</text>
+    <text x="435" y="182" text-anchor="middle" font-size="10" fill="#f6c7a8">created by kafka-init</text>
+    <line x1="285" y1="124" x2="358" y2="140" stroke="#c2410c" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="358" y1="160" x2="287" y2="132" stroke="#c2410c" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="285" y1="40" x2="360" y2="105" stroke="#9aa3ad" /><line x1="285" y1="80" x2="360" y2="115" stroke="#9aa3ad"/>
+    <line x1="285" y1="170" x2="360" y2="180" stroke="#9aa3ad"/><line x1="285" y1="210" x2="365" y2="195" stroke="#9aa3ad"/>
+    <line x1="285" y1="252" x2="380" y2="203" stroke="#9aa3ad"/><line x1="285" y1="288" x2="400" y2="205" stroke="#9aa3ad"/>
+    <!-- dbs -->
+    <ellipse cx="625" cy="110" rx="80" ry="14" fill="#ecfdf3" stroke="#15803d"/>
+    <rect x="545" y="110" width="160" height="50" fill="#ecfdf3" stroke="none"/>
+    <line x1="545" y1="110" x2="545" y2="160" stroke="#15803d"/><line x1="705" y1="110" x2="705" y2="160" stroke="#15803d"/>
+    <ellipse cx="625" cy="160" rx="80" ry="14" fill="#ecfdf3" stroke="#15803d"/>
+    <text x="625" y="132" text-anchor="middle" font-size="12" font-weight="700">MongoDB</text>
+    <text x="625" y="148" text-anchor="middle" font-size="9" fill="#5b6470">one logical DB per service</text>
+    <text x="625" y="166" text-anchor="middle" font-size="9" fill="#c2410c" font-weight="700">order_service.orders</text>
+    <ellipse cx="625" cy="215" rx="80" ry="12" fill="#eef3ff" stroke="#1d4ed8"/>
+    <rect x="545" y="215" width="160" height="38" fill="#eef3ff"/>
+    <line x1="545" y1="215" x2="545" y2="253" stroke="#1d4ed8"/><line x1="705" y1="215" x2="705" y2="253" stroke="#1d4ed8"/>
+    <ellipse cx="625" cy="253" rx="80" ry="12" fill="#eef3ff" stroke="#1d4ed8"/>
+    <text x="625" y="240" text-anchor="middle" font-size="12" font-weight="700">PostgreSQL</text>
+    <text x="625" y="256" text-anchor="middle" font-size="9" fill="#5b6470">payments only</text>
+  </svg>
+
+  <h3>Four architectural rules (say them in this order)</h3>
+  <ol>
+    <li><b>Events, not calls.</b> No service calls another service's API. Coupling is only on the shared Kafka contract in the root README.</li>
+    <li><b>Database per service.</b> Each service owns its data; others keep their own <i>read models</i> built from events (CQRS style). If one service is down, the others still answer from their copy.</li>
+    <li><b>Keyed by <code>orderId</code>.</b> All events for one order land on one partition, so they stay in order; different orders spread over 3 partitions for parallelism.</li>
+    <li><b>At-least-once, idempotent consumers.</b> Kafka can redeliver, so every handler is safe to run twice (upserts, unique indexes, status guards).</li>
+  </ol>
+
+  <h3>Kafka contract (my two topics highlighted)</h3>
+  <table class="small">
+    <tr><th>Topic</th><th>Producer</th><th>Consumers</th></tr>
+    <tr class="me"><td><code>orders.created</code></td><td>Order</td><td>Customer, Restaurant, Payment, Notification, Admin</td></tr>
+    <tr class="me"><td><code>orders.status_updated</code></td><td>Order</td><td>Customer, Payment, Delivery, Notification, Admin</td></tr>
+    <tr><td><code>restaurant.status</code></td><td>Restaurant</td><td><b>Order</b>, Notification</td></tr>
+    <tr><td><code>payments.completed</code></td><td>Payment</td><td><b>Order</b>, Delivery, Notification, Admin</td></tr>
+    <tr><td><code>delivery.status_updated</code></td><td>Delivery</td><td><b>Order</b></td></tr>
+    <tr><td><code>delivery.assigned</code> / <code>delivery.completed</code></td><td>Delivery</td><td>Notification, Admin</td></tr>
+  </table>
+  <div class="say"><b>Say:</b> "Notice the Order Service is on both ends of the contract: it produces the two topics almost every service listens to, and it consumes the three topics that report progress back. That's why it is the centre of the choreography — but it still never calls anyone."</div>
+</section>
+
+<!-- ============ 3 STRUCTURE ============ -->
+<section class="page">
+  <h2>3 · My part: the Order Service</h2>
+  <p><span class="tag">Ballerina 2201.13.5</span><span class="tag">MongoDB</span><span class="tag">Kafka</span><span class="tag">port 8081</span></p>
+  <h3>Responsibilities</h3>
+  <ul>
+    <li><b>Create orders</b> (<code>POST /orders</code>): validate, compute the total, save as <code>CREATED</code>, publish <code>orders.created</code>.</li>
+    <li><b>Own the lifecycle</b>: the only service allowed to change an order's status, and only along legal transitions.</li>
+    <li><b>Auto-advance</b> orders from <code>restaurant.status</code>, <code>payments.completed</code> and <code>delivery.status_updated</code>.</li>
+    <li><b>Announce every change</b> on <code>orders.status_updated</code> — which is what triggers refunds, delivery cancellation, notifications and admin stats elsewhere.</li>
+    <li><b>Serve queries</b> for the customer's "My orders" page and the restaurant's kitchen board.</li>
+  </ul>
+
+  <h3>Module layout — one responsibility per module</h3>
+  <svg viewBox="0 0 720 200" width="100%" class="avoid">
+    <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1b1f24"/></marker></defs>
+    <rect x="270" y="10" width="180" height="46" rx="6" fill="#fff3ea" stroke="#c2410c" stroke-width="2"/>
+    <text x="360" y="30" text-anchor="middle" font-size="12" font-weight="700">service.bal</text>
+    <text x="360" y="46" text-anchor="middle" font-size="9.5" fill="#5b6470">REST API only, no business logic</text>
+    <rect x="40" y="96" width="190" height="46" rx="6" fill="#fff" stroke="#1b1f24"/>
+    <text x="135" y="116" text-anchor="middle" font-size="12" font-weight="700">messaging/</text>
+    <text x="135" y="132" text-anchor="middle" font-size="9.5" fill="#5b6470">Kafka producer + consumer</text>
+    <rect x="490" y="96" width="190" height="46" rx="6" fill="#fff" stroke="#1b1f24"/>
+    <text x="585" y="116" text-anchor="middle" font-size="12" font-weight="700">store/</text>
+    <text x="585" y="132" text-anchor="middle" font-size="9.5" fill="#5b6470">MongoDB, indexes, CRUD</text>
+    <rect x="270" y="148" width="180" height="46" rx="6" fill="#ecfdf3" stroke="#15803d" stroke-width="2"/>
+    <text x="360" y="168" text-anchor="middle" font-size="12" font-weight="700">lifecycle/</text>
+    <text x="360" y="184" text-anchor="middle" font-size="9.5" fill="#5b6470">pure domain: no I/O imports</text>
+    <line x1="300" y1="56" x2="180" y2="94" stroke="#1b1f24" marker-end="url(#ar2)"/>
+    <line x1="420" y1="56" x2="540" y2="94" stroke="#1b1f24" marker-end="url(#ar2)"/>
+    <line x1="360" y1="56" x2="360" y2="146" stroke="#1b1f24" marker-end="url(#ar2)"/>
+    <line x1="230" y1="119" x2="488" y2="119" stroke="#1b1f24" marker-end="url(#ar2)"/>
+    <line x1="180" y1="142" x2="268" y2="166" stroke="#1b1f24" marker-end="url(#ar2)"/>
+    <line x1="540" y1="142" x2="452" y2="166" stroke="#1b1f24" marker-end="url(#ar2)"/>
+  </svg>
+  <p class="small mute" style="text-align:center">Arrows = "depends on". Nothing depends on <code>service.bal</code>; <code>lifecycle</code> depends on nothing.</p>
+
+  <div class="say"><b>Say:</b> "I split the service into Ballerina submodules with one-way dependencies. The key one is <code>lifecycle</code>: it holds the order types, the transition rules, total calculation and validation, and it imports nothing — no HTTP, no Kafka, no Mongo. That means the most important rules in the system can be unit-tested in under a second with no infrastructure running, and both the REST API and the Kafka consumer use exactly the same rules."</div>
+
+  <h3>Why submodules and not just folders?</h3>
+  <p>Ballerina only compiles <code>.bal</code> files sitting directly in a module directory — arbitrary subfolders are silently ignored. So the "folders" are real modules (<code>modules/&lt;name&gt;/</code>), which also gives us enforced boundaries: <code>store</code> cannot accidentally import <code>messaging</code>.</p>
+
+  <h3>One non-obvious detail worth mentioning</h3>
+  <p><code>service.bal</code> calls <code>messaging:consumedTopics()</code> for the health endpoint. Besides reporting what we consume, it guarantees the module is imported — in Ballerina an unimported module's Kafka listener never starts.</p>
+</section>
+
+<!-- ============ 4 STATE MACHINE ============ -->
+<section class="page">
+  <h2>4 · The order state machine</h2>
+  <svg viewBox="0 0 720 230" width="100%" class="avoid">
+    <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1b1f24"/></marker>
+    <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker></defs>
+    <g font-size="10.5" font-weight="700">
+      <rect x="5"   y="40" width="92" height="36" rx="18" fill="#fff" stroke="#1b1f24"/><text x="51"  y="62" text-anchor="middle">CREATED</text>
+      <rect x="125" y="40" width="100" height="36" rx="18" fill="#fff" stroke="#1b1f24"/><text x="175" y="62" text-anchor="middle">CONFIRMED</text>
+      <rect x="253" y="40" width="98" height="36" rx="18" fill="#fff" stroke="#1b1f24"/><text x="302" y="62" text-anchor="middle">PREPARING</text>
+      <rect x="379" y="40" width="72" height="36" rx="18" fill="#fff" stroke="#1b1f24"/><text x="415" y="62" text-anchor="middle">READY</text>
+      <rect x="479" y="40" width="130" height="36" rx="18" fill="#fff" stroke="#1b1f24"/><text x="544" y="62" text-anchor="middle">OUT_FOR_DELIVERY</text>
+      <rect x="630" y="40" width="85" height="36" rx="18" fill="#ecfdf3" stroke="#15803d" stroke-width="2"/><text x="672" y="62" text-anchor="middle">DELIVERED</text>
+      <rect x="125" y="170" width="226" height="36" rx="18" fill="#fff3ea" stroke="#c2410c" stroke-width="2"/><text x="238" y="192" text-anchor="middle" fill="#c2410c">CANCELLED</text>
+    </g>
+    <g stroke="#1b1f24" marker-end="url(#ar3)">
+      <line x1="97" y1="58" x2="123" y2="58"/><line x1="225" y1="58" x2="251" y2="58"/><line x1="351" y1="58" x2="377" y2="58"/><line x1="451" y1="58" x2="477" y2="58"/><line x1="609" y1="58" x2="628" y2="58"/>
+    </g>
+    <g stroke="#c2410c" stroke-dasharray="4 3" marker-end="url(#ar4)">
+      <line x1="51" y1="76" x2="160" y2="168"/><line x1="175" y1="76" x2="215" y2="168"/><line x1="302" y1="76" x2="290" y2="168"/>
+    </g>
+    <g font-size="9" fill="#5b6470">
+      <text x="110" y="30" text-anchor="middle">restaurant ACK</text>
+      <text x="238" y="30" text-anchor="middle">payment SUCCESS</text>
+      <text x="365" y="30" text-anchor="middle">kitchen REST</text>
+      <text x="465" y="30" text-anchor="middle">PICKED_UP</text>
+      <text x="619" y="30" text-anchor="middle">DELIVERED</text>
+      <text x="420" y="110">READY and later: cannot be cancelled</text>
+      <text x="420" y="124">(food is made / in transit)</text>
+      <text x="20" y="130" fill="#c2410c">customer, restaurant</text>
+      <text x="20" y="143" fill="#c2410c">REJECTED, or REST</text>
+    </g>
+  </svg>
+
+  <table class="small">
+    <tr><th>From</th><th>Allowed next</th><th>Who / what triggers it</th></tr>
+    <tr><td>CREATED</td><td>CONFIRMED, CANCELLED</td><td><code>restaurant.status</code> ACKNOWLEDGED / REJECTED, or customer cancel</td></tr>
+    <tr><td>CONFIRMED</td><td>PREPARING, CANCELLED</td><td><code>payments.completed</code> SUCCESS (or the ACK if payment came first)</td></tr>
+    <tr><td>PREPARING</td><td>READY, CANCELLED</td><td>Restaurant clicks <b>Mark ready</b> → <code>PUT /orders/{id}/status</code></td></tr>
+    <tr><td>READY</td><td>OUT_FOR_DELIVERY</td><td><code>delivery.status_updated</code> PICKED_UP</td></tr>
+    <tr><td>OUT_FOR_DELIVERY</td><td>DELIVERED</td><td><code>delivery.status_updated</code> DELIVERED</td></tr>
+    <tr><td>DELIVERED / CANCELLED</td><td>— (terminal)</td><td>Every further request gets <b>409 Conflict</b></td></tr>
+  </table>
+
+  <h3>How it is enforced</h3>
+  <p>One function, <code>isValidTransition(current, next)</code> in <code>modules/lifecycle/types.bal:55</code>, is a <code>match</code> on the current status. It is the single source of truth: the REST endpoint checks it before writing, and the Kafka consumer only ever asks for legal steps.</p>
+
+  <div class="say"><b>Say:</b> "The state machine is deliberately strict. You can't skip steps, you can't go backwards, and terminal states stay terminal. Cancellation is only allowed up to PREPARING — once the food is ready we can't un-cook it, and once it's with the driver the delivery service also refuses to cancel. Every illegal request gets a 409, not a silent overwrite."</div>
+
+  <h3>Catch-up behaviour</h3>
+  <p>If the driver marks an order DELIVERED without a separate pick-up (order still READY), the consumer walks it READY → OUT_FOR_DELIVERY → DELIVERED using two <i>legal</i> transitions, so the history and the published events stay correct (<code>consumer.bal:154</code>).</p>
+</section>
+
+<!-- ============ 5 CHOREOGRAPHY ============ -->
+<section class="page">
+  <h2>5 · Event choreography: how orders move on their own</h2>
+  <p>The hardest design problem in my service: <b>the restaurant's acknowledgement and the payment result are produced by two different services on two different topics, so they can arrive in either order.</b></p>
+
+  <svg viewBox="0 0 720 270" width="100%" class="avoid">
+    <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1b1f24"/></marker></defs>
+    <g font-size="11" font-weight="700" text-anchor="middle">
+      <rect x="20" y="8" width="110" height="26" rx="4" fill="#f7f8fa" stroke="#1b1f24"/><text x="75" y="26">Customer UI</text>
+      <rect x="200" y="8" width="110" height="26" rx="4" fill="#fff3ea" stroke="#c2410c" stroke-width="2"/><text x="255" y="26" fill="#c2410c">Order</text>
+      <rect x="390" y="8" width="110" height="26" rx="4" fill="#f7f8fa" stroke="#1b1f24"/><text x="445" y="26">Restaurant</text>
+      <rect x="570" y="8" width="110" height="26" rx="4" fill="#f7f8fa" stroke="#1b1f24"/><text x="625" y="26">Payment</text>
+    </g>
+    <g stroke="#9aa3ad" stroke-dasharray="3 3"><line x1="75" y1="34" x2="75" y2="265"/><line x1="255" y1="34" x2="255" y2="265"/><line x1="445" y1="34" x2="445" y2="265"/><line x1="625" y1="34" x2="625" y2="265"/></g>
+    <g font-size="9.5" stroke="#1b1f24">
+      <line x1="75" y1="55" x2="253" y2="55" marker-end="url(#a5)"/><text x="165" y="50" stroke="none" text-anchor="middle">POST /orders</text>
+      <text x="262" y="72" stroke="none" fill="#c2410c" font-weight="700">save CREATED</text>
+      <line x1="255" y1="88" x2="443" y2="88" marker-end="url(#a5)"/><line x1="255" y1="88" x2="623" y2="88" marker-end="url(#a5)"/>
+      <text x="350" y="83" stroke="none" text-anchor="middle">orders.created (fan-out)</text>
+      <text x="452" y="108" stroke="none">hours + stock OK?</text>
+      <text x="632" y="108" stroke="none">simulated charge</text>
+      <line x1="623" y1="130" x2="257" y2="130" marker-end="url(#a5)"/><text x="530" y="125" stroke="none" text-anchor="middle">① payments.completed SUCCESS</text>
+      <text x="262" y="148" stroke="none" fill="#c2410c">still CREATED → store paymentStatus=SUCCESS, wait</text>
+      <line x1="443" y1="172" x2="257" y2="172" marker-end="url(#a5)"/><text x="350" y="167" stroke="none" text-anchor="middle">② restaurant.status ACK</text>
+      <text x="262" y="190" stroke="none" fill="#c2410c">CREATED → CONFIRMED, payment already SUCCESS</text>
+      <text x="262" y="203" stroke="none" fill="#c2410c">→ CONFIRMED → PREPARING (second event advances)</text>
+      <line x1="255" y1="228" x2="623" y2="228" marker-end="url(#a5)"/><line x1="255" y1="228" x2="443" y2="228" marker-end="url(#a5)"/>
+      <text x="400" y="222" stroke="none" text-anchor="middle">orders.status_updated ×2</text>
+      <text x="262" y="252" stroke="none" fill="#5b6470">If the ACK arrives first instead: CONFIRMED now, PREPARING on payment.</text>
+    </g>
+  </svg>
+
+  <h3>The rule: "whichever event arrives second advances the order"</h3>
+  <ul>
+    <li><b>Payment handler</b> (<code>consumer.bal:67</code>) always stores <code>paymentStatus</code> on the order. If the order is already CONFIRMED and payment succeeded → advance to PREPARING. If still CREATED → do nothing; the ACK will finish the job.</li>
+    <li><b>Restaurant handler</b> (<code>consumer.bal:92</code>) moves CREATED → CONFIRMED, then checks the stored <code>paymentStatus</code>; if it is already SUCCESS it continues straight to PREPARING.</li>
+    <li>A <b>FAILED</b> payment is recorded but the order stays put — the UI shows <b>Retry payment</b>, and a later SUCCESS advances it normally.</li>
+  </ul>
+
+  <h3>Rejection path (cancel + refund without any direct call)</h3>
+  <pre>restaurant.status REJECTED (reason: "closed" / "out of stock")
+   └─ Order: store cancellationReason, CREATED|CONFIRMED → CANCELLED
+        └─ orders.status_updated CANCELLED
+             ├─ Payment:  refund any SUCCESS payment, remember order as cancelled
+             ├─ Delivery: cancel delivery if not yet picked up
+             └─ Notification / Admin / Customer: update their read models</pre>
+  <div class="say"><b>Say:</b> "My service doesn't know refunds exist. It just publishes 'this order is now CANCELLED', and the payment and delivery services each decide what that means for them. That's choreography rather than orchestration — adding a new reaction to cancellation needs zero changes in my code."</div>
+</section>
+
+<!-- ============ 6 DATA & CONSISTENCY ============ -->
+<section class="page">
+  <h2>6 · Data design &amp; consistency guarantees</h2>
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:0">The <code>orders</code> document</h3>
+<pre>{
+  "orderId": "uuid",          // unique index
+  "customerId": "uuid",
+  "restaurantId": "uuid",
+  "items": [{ "itemId", "name",
+              "quantity", "unitPrice" }],
+  "totalAmount": 90.00,       // decimal
+  "status": "PREPARING",
+  "paymentStatus": "SUCCESS", // optional
+  "cancellationReason": "...",// optional
+  "createdAt": "ISO-8601",
+  "updatedAt": "ISO-8601"
+}</pre>
+    </div>
+    <div>
+      <h3 style="margin-top:0">Design decisions</h3>
+      <ul class="small">
+        <li><b>Items embedded as a snapshot</b> of name and price at order time — if the restaurant changes its prices later, past orders don't change, and reading an order needs no join.</li>
+        <li><b><code>decimal</code>, not float</b>, for money.</li>
+        <li><b>IDs, not foreign keys</b> — <code>customerId</code> / <code>restaurantId</code> live in other services' databases.</li>
+        <li><b>Optional fields</b> (<code>paymentStatus?</code>) so documents written before a field existed still deserialise.</li>
+      </ul>
+      <h3>Indexes (created at startup, <code>store.bal:31</code>)</h3>
+      <ul class="small">
+        <li><code>{orderId:1}</code> unique — the platform-wide key</li>
+        <li><code>{customerId:1, createdAt:-1}</code> — "My orders", newest first</li>
+        <li><code>{restaurantId:1, createdAt:-1}</code> — kitchen board</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Five guarantees and how each one is achieved</h3>
+  <table class="small">
+    <tr><th style="width:28%">Guarantee</th><th>Mechanism</th></tr>
+    <tr><td><b>No lost updates</b> under concurrency</td><td><b>Optimistic concurrency.</b> <code>applyStatusTransition</code> updates with filter <code>{orderId, status: previousStatus}</code>. If a REST call and a Kafka event race, only one matches; the loser gets <code>matchedCount == 0</code> → an error / 409 instead of overwriting (<code>store.bal:77</code>).</td></tr>
+    <tr><td><b>Per-order ordering</b></td><td>Every event keyed by <code>orderId</code> → same partition → processed in order.</td></tr>
+    <tr><td><b>Redelivery is harmless</b> (idempotency)</td><td>Each handler checks the current status first: an ACK for an order that is no longer CREATED, or a pickup for an order that isn't READY, is logged and skipped.</td></tr>
+    <tr><td><b>No silent message loss</b> on consume</td><td><code>autoCommit: false</code>; offsets committed only after the batch has been handled (<code>consumer.bal:22–42</code>).</td></tr>
+    <tr><td><b>Durable publish</b></td><td>Producer uses <code>acks: "all"</code> with <code>retryCount: 3</code> (<code>producer.bal:13</code>).</td></tr>
+  </table>
+
+  <div class="say"><b>Say:</b> "Kafka gives us at-least-once delivery, so I designed every handler on the assumption that it will see the same event twice. The status check at the top of each handler plus the optimistic update in Mongo means replaying the whole topic from the beginning would leave every order exactly where it is."</div>
+
+  <div class="warn"><b>Own it:</b> a record that fails to parse is logged and its offset is still committed, so it is effectively dropped. That keeps one bad message from blocking the partition, but in production I'd route it to a <b>dead-letter topic</b> instead.</div>
+</section>
+
+<!-- ============ 7 REST & VALIDATION ============ -->
+<section class="page">
+  <h2>7 · REST API &amp; validation</h2>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Behaviour</th><th>Errors</th></tr>
+    <tr><td>POST</td><td><code>/orders</code></td><td>Validate → compute total → save CREATED → publish <code>orders.created</code></td><td>400 invalid, 500 DB/Kafka</td></tr>
+    <tr><td>GET</td><td><code>/orders</code></td><td>Newest first; filters <code>?customerId=</code> <code>?restaurantId=</code> <code>?status=</code></td><td>500</td></tr>
+    <tr><td>GET</td><td><code>/orders/{id}</code></td><td>One order</td><td>404</td></tr>
+    <tr><td>PUT</td><td><code>/orders/{id}/status</code></td><td>Check <code>isValidTransition</code> → optimistic update → publish <code>orders.status_updated</code></td><td>404, 409 illegal or concurrent</td></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td><code>{status, consumedTopics}</code></td><td>—</td></tr>
+  </table>
+  <p class="small mute"><code>/health</code> is its own service base path so it can never be mistaken for an <code>orderId</code>.</p>
+
+  <h3>Validation rules (<code>validateCreateOrder</code>, <code>types.bal:89</code>)</h3>
+  <ul>
+    <li><code>customerId</code> and <code>restaurantId</code> must be non-blank.</li>
+    <li>At least one item; each item needs an <code>itemId</code> and a <code>name</code>.</li>
+    <li>Quantity between <b>1 and 50</b> (<code>MAX_ITEM_QUANTITY</code>).</li>
+    <li>Unit price strictly greater than zero.</li>
+    <li>The <b>total is computed on the server</b> (<code>computeOrderTotal</code>) — the client never sends an amount, so it can't under-pay.</li>
+  </ul>
+  <p>Ballerina also rejects malformed JSON or unknown status values automatically, because request bodies bind to closed records and the <code>OrderStatus</code> enum.</p>
+
+  <h3>What the Order Service deliberately does <i>not</i> validate</h3>
+  <p>It does not check that the restaurant is open or the dish is in stock — that data belongs to the Restaurant Service. Instead the order is accepted as CREATED and the restaurant answers asynchronously with ACKNOWLEDGED or REJECTED. This keeps services decoupled: placing an order works even if the restaurant service is briefly down; the order simply waits in CREATED until it recovers.</p>
+
+  <div class="say"><b>Say:</b> "Validation is split by ownership. I validate what my service knows — shape, quantities, prices. Business rules about the restaurant are validated by the restaurant, and come back as an event. That's the price of not having synchronous calls, and it's also what makes the system resilient."</div>
+
+  <h3>Sample request</h3>
+<pre>POST /orders
+{ "customerId": "c-1", "restaurantId": "r-1",
+  "items": [{ "itemId": "i-1", "name": "Kapana beef strips", "quantity": 2, "unitPrice": 45.0 }] }
+→ 200 { "orderId": "…", "totalAmount": 90.0, "status": "CREATED", … }</pre>
+</section>
+
+<!-- ============ 8 TESTING ============ -->
+<section class="page">
+  <h2>8 · Testing strategy</h2>
+  <p>Three tiers, from fastest to most realistic.</p>
+  <table>
+    <tr><th>Tier</th><th>What</th><th>Needs</th><th>Command</th></tr>
+    <tr class="me"><td>Unit</td><td><b>All 49 from→to combinations</b> of <code>isValidTransition</code> (7×7 matrix via a data provider), <code>computeOrderTotal</code>, and <code>validateCreateOrder</code> accept/reject cases</td><td>Nothing</td><td><code>bal test --tests "order_service.lifecycle:*"</code></td></tr>
+    <tr class="me"><td>Integration</td><td>7 tests against the real HTTP API + Mongo + Kafka: create, empty items → 400, unknown → 404, valid transitions, invalid → 409, list</td><td>Kafka, Mongo</td><td><code>bal test --groups integration …</code></td></tr>
+    <tr class="me"><td>End-to-end</td><td><code>scripts/smoke-test.mjs</code>: one order CREATED → DELIVERED across all 7 services, a closed restaurant rejecting → CANCELLED + refunded, notifications, admin stats, validation</td><td>Full stack</td><td><code>node scripts/smoke-test.mjs</code></td></tr>
+  </table>
+
+  <div class="say"><b>Say:</b> "The expected values in the transition matrix were written from the state diagram, not copied from the code — so the test actually checks the logic instead of restating it. Testing all 49 pairs means every 'not allowed' case is proven, not just the happy path."</div>
+
+  <h3>Why the domain module made this possible</h3>
+  <p>The <code>store</code> and <code>messaging</code> modules connect to Mongo and Kafka the moment they initialise, so anything importing them needs infrastructure. Putting the rules in <code>lifecycle</code> with zero I/O imports means the most important tests run anywhere, in well under a second.</p>
+
+  </section>
+<section class="page">
+  <h2>9 · My integration work across the team</h2>
+  <p>Beyond my own service, the commit history shows I took on making the seven services work as <b>one system</b>:</p>
+  <table class="small">
+    <tr><th style="width:30%">Area</th><th>What I did</th></tr>
+    <tr><td>Docker Compose</td><td>Every service in one <code>docker-compose.yml</code>; healthchecks and restart policies; fixed image builds (Java 21 runtime for the Mongo/Kafka connectors).</td></tr>
+    <tr><td>Kafka topics</td><td>One-shot <code>kafka-init</code> container creates all 7 topics with 3 partitions <i>before</i> any service subscribes; every service waits on it.</td></tr>
+    <tr><td>Kafka contract</td><td>Wrote the single-source-of-truth topic table in the root README; consumers use <b>open records</b> so extra fields never break anyone.</td></tr>
+    <tr><td>Cross-service fixes</td><td>Payment double-charging and event contract; restaurant menu ownership checks and opening hours/stock; delivery cancellation before payment; notification storage; admin Kafka listener crash on startup.</td></tr>
+    <tr><td>Web front-end</td><td>Dependency-free UI (customer, restaurant, driver, admin, system tabs) behind an nginx proxy at <code>/api/&lt;service&gt;/</code>.</td></tr>
+    <tr><td>Verification &amp; docs</td><td>End-to-end smoke test, <code>DATABASE.md</code>, architecture diagram.</td></tr>
+  </table>
+  <div class="tip"><b>Tip:</b> credit teammates by name when the panel asks about their services ("Albert's payment service uses a partial unique index…"), then bring it back to how it plugs into the order lifecycle.</div>
+</section>
+
+<!-- ============ 10 DEMO ============ -->
+<section class="page">
+  <h2>10 · Live demo script</h2>
+  <p class="mute">About 3 minutes. Narrate the <b>Order Service status</b> at every step — that's your part.</p>
+
+  <h3>A · Happy path</h3>
+  <div class="step"><div class="n">1</div><div><b>System tab</b> — show 7 green health cards and the topics each consumes. Point at the Order card: <code>restaurant.status, payments.completed, delivery.status_updated</code>.</div></div>
+  <div class="step"><div class="n">2</div><div><b>Customer tab</b> — pick a dish, place the order. <i>"My service saved it as CREATED and published orders.created to five consumers."</i></div></div>
+  <div class="step"><div class="n">3</div><div>Watch the tracker go <b>CREATED → CONFIRMED → PREPARING</b> on its own. <i>"Restaurant acknowledged, payment succeeded — whichever arrived second pushed it to PREPARING."</i> Show the <code>Auto-advanced order</code> lines in <code>docker compose logs order-service</code>.</div></div>
+  <div class="step"><div class="n">4</div><div><b>Restaurant tab</b> — click <b>Mark ready</b>. <i>"That's the one manual step: a REST call to PUT /orders/{id}/status, checked against the state machine."</i></div></div>
+  <div class="step"><div class="n">5</div><div><b>Driver tab</b> — the delivery was already assigned. <b>Confirm pickup</b> → order becomes OUT_FOR_DELIVERY; <b>Mark delivered</b> → DELIVERED.</div></div>
+  <div class="step"><div class="n">6</div><div><b>Admin tab</b> — stats updated; <b>Customer inbox</b> shows notifications. <i>"None of those services ever called mine — they all read my events."</i></div></div>
+
+  <h3>B · Rejection &amp; refund</h3>
+  <div class="step"><div class="n">7</div><div><b>Restaurant tab</b> → <b>Pause orders</b>. Place another order as the customer.</div></div>
+  <div class="step"><div class="n">8</div><div>Order goes to <b>CANCELLED</b> with the reason shown. Payment shows <b>REFUNDED</b>. <i>"Restaurant sent REJECTED; I cancelled and published it; payment refunded on its own."</i></div></div>
+
+  <h3>C · Prove the state machine (optional, if time)</h3>
+<pre>curl -X PUT localhost:8081/orders/&lt;delivered-id&gt;/status \
+     -H 'Content-Type: application/json' -d '{"status":"CANCELLED"}'
+→ 409 {"message":"Invalid transition from DELIVERED to CANCELLED"}</pre>
+
+  <div class="tip"><b>If the demo stalls:</b> about 15% of payments fail on purpose. If an order sits in CONFIRMED, that's a <i>failed payment</i> — click <b>Retry payment</b> and turn it into a talking point: "the order waits safely; the retry's SUCCESS event advances it". If something is truly broken, fall back to <code>node scripts/smoke-test.mjs</code> output.</div>
+  <div class="tip"><b>Ports:</b> UI 3000 · order 8081 · Kafka from host <code>localhost:29092</code> · Mongo <code>27017</code>. Inspect data: <code>docker compose exec mongo mongosh</code> → <code>use order_service</code> → <code>db.orders.find().sort({createdAt:-1}).limit(1)</code>.</div>
+</section>
+
+<!-- ============ 11 Q&A ============ -->
+<section class="page">
+  <h2>11 · Expected questions &amp; answers</h2>
+  <h3 style="margin-top:0">About the Order Service (most likely)</h3>
+  <div class="qa"><div class="q">What happens if the payment arrives before the restaurant acknowledges?</div><div class="a">The payment handler stores <code>paymentStatus = SUCCESS</code> but leaves the order in CREATED. When the ACK arrives, the restaurant handler moves it to CONFIRMED and, seeing the stored SUCCESS, straight on to PREPARING. Either order of arrival ends in the same state.</div></div>
+  <div class="qa"><div class="q">What if a REST status update and a Kafka event change the same order at the same moment?</div><div class="a">Both use <code>applyStatusTransition</code>, which updates with filter <code>{orderId, status: expectedPrevious}</code>. Mongo's single-document update is atomic, so only one matches. The REST caller gets 409 "changed concurrently, please retry"; the consumer logs the error. No write is lost or overwritten.</div></div>
+  <div class="qa"><div class="q">What if Kafka delivers the same event twice?</div><div class="a">Each handler checks the current status first. A second ACK finds the order no longer CREATED and is skipped; a second pickup finds it no longer READY. The optimistic filter is a second safety net. So handlers are idempotent.</div></div>
+  <div class="qa"><div class="q">Why not have the Order Service call Payment and Restaurant directly (orchestration)?</div><div class="a">Direct calls would couple availability — if Payment is down, nobody can order. With events, I publish once and each service reacts when it can; new reactions (notifications, admin stats) were added with no change to my code. The trade-off is eventual consistency and harder tracing, which we accept and mitigate with the health page and logs.</div></div>
+  <div class="qa"><div class="q">Why MongoDB for orders?</div><div class="a">An order is a self-contained aggregate — header plus embedded items — always read and written as one unit. A document fits naturally, single-document updates are atomic (which my optimistic concurrency relies on), and there are no cross-entity joins. Payments chose Postgres because money needs constraints and ACID across rows.</div></div>
+  <div class="qa"><div class="q">Why are items copied into the order instead of referenced?</div><div class="a">An order is a historical record. If the restaurant changes a price or deletes a dish, past orders must still show what the customer paid. It also avoids a cross-service lookup.</div></div>
+  <div class="qa"><div class="q">Why can't a READY order be cancelled?</div><div class="a">The food has been made and the driver may be on the way; cancelling would waste food and conflict with the delivery service, which also refuses to cancel after pickup. It's a business rule encoded in <code>isValidTransition</code>.</div></div>
+  <div class="qa"><div class="q">How do you guarantee events for one order are processed in order?</div><div class="a">All topics are keyed by <code>orderId</code>, so Kafka puts every event for that order on the same partition, and a partition is consumed in order. Across topics there's no ordering guarantee — which is exactly why I handle ACK/payment in either order.</div></div>
+  <div class="qa"><div class="q">What if your service crashes after saving the order but before publishing?</div><div class="a">That's the dual-write problem: the order exists in Mongo but no one hears about it, and the customer gets a 500. The proper fix is a <b>transactional outbox</b> — write the event into an outbox collection in the same write as the order, and have a relay publish it. It's documented as a known limitation.</div></div>
+  <div class="qa"><div class="q">What does an unknown <code>orderId</code> in an incoming event mean?</div><div class="a">Normally impossible, because I only publish <code>orders.created</code> after the save succeeds. If it happens (e.g. test data) it's logged as a warning and skipped, so it can't crash the consumer.</div></div>
+  <div class="qa"><div class="q">How would you scale the Order Service?</div><div class="a">Run more instances in the same consumer group — Kafka spreads the 3 partitions across them, and per-order ordering is preserved because one order is always on one partition. The REST side is stateless, and the optimistic concurrency keeps instances from clobbering each other. Beyond 3 consumers we'd add partitions.</div></div>
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">About the system as a whole</h3>
+  <div class="qa"><div class="q">How does a cancelled order get refunded?</div><div class="a">I publish <code>orders.status_updated</code> with CANCELLED. The Payment Service flips the SUCCESS row to REFUNDED and publishes <code>payments.completed</code> REFUNDED; it also records the order in <code>cancelled_orders</code> so a late charge can never go through.</div></div>
+  <div class="qa"><div class="q">Can a customer be charged twice?</div><div class="a">No — Payment has a partial unique index allowing at most one SUCCESS row per order, enforced by Postgres even if two attempts race past the code check.</div></div>
+  <div class="qa"><div class="q">Can a driver get two deliveries at once?</div><div class="a">No — Delivery claims a driver with filter <code>{driverId, status: AVAILABLE}</code>, the same optimistic pattern I use for orders. Only one claim can match.</div></div>
+  <div class="qa"><div class="q">Can stock go negative?</div><div class="a">No — Restaurant decrements with <code>{stockCount: {$gte: quantity}}</code> plus <code>$inc</code> in one atomic update.</div></div>
+  <div class="qa"><div class="q">Why one MongoDB server if it's "database per service"?</div><div class="a">It's one server for convenience in Compose, but each service has its own logical database and never touches another's. Moving one to its own server only changes <code>Config.toml</code>.</div></div>
+  <div class="qa"><div class="q">How do services stay compatible as events evolve?</div><div class="a">One documented contract in the README, and consumers use <b>open records</b>, so a producer can add fields without breaking anyone. Removing or renaming a field would need a versioned topic.</div></div>
+  <div class="qa"><div class="q">How do you know the whole thing works?</div><div class="a">The smoke test drives a real order through all seven services through the same nginx proxy the UI uses, including the rejection/refund path, and exits non-zero on any failure.</div></div>
+
+  <h2 style="margin-top:7mm">12 · Limitations I'd fix next</h2>
+  <div class="warn">Raise these yourself — it shows you understand the design rather than defending it blindly.</div>
+  <table class="small">
+    <tr><th style="width:30%">Limitation</th><th>Impact</th><th>Fix</th></tr>
+    <tr><td>Dual write (Mongo then Kafka)</td><td>Crash between the two leaves DB and events out of sync</td><td>Transactional outbox + relay (or Debezium CDC)</td></tr>
+    <tr><td>Bad records are logged and skipped</td><td>A malformed event is effectively lost</td><td>Dead-letter topic + alerting</td></tr>
+    <tr><td>No authentication / authorisation</td><td>Anyone can call any API, e.g. advance any order</td><td>JWT at the gateway; roles (customer / restaurant / driver)</td></tr>
+    <tr><td>Single Kafka broker, replication 1</td><td>Broker loss = outage</td><td>3 brokers, replication factor 3, <code>min.insync.replicas=2</code></td></tr>
+    <tr><td>No distributed tracing</td><td>Hard to follow one order across 7 services</td><td>Propagate a correlation ID; Ballerina observability is already enabled in <code>Ballerina.toml</code></td></tr>
+    <tr><td>No order timeout</td><td>An order whose restaurant never replies stays CREATED</td><td>Scheduled job cancels stale CREATED orders</td></tr>
+  </table>
+
+</section>
+<section class="page">
+  <h2>Code cheat-sheet</h2><p class="mute">Open these if the panel says "show me".</p>
+  <table class="small">
+    <tr><th>Concept</th><th>Where</th></tr>
+    <tr><td>State machine</td><td><code>order-service/modules/lifecycle/types.bal:55</code></td></tr>
+    <tr><td>Request validation</td><td><code>order-service/modules/lifecycle/types.bal:89</code></td></tr>
+    <tr><td>Create order endpoint</td><td><code>order-service/service.bal:22</code></td></tr>
+    <tr><td>Status update endpoint</td><td><code>order-service/service.bal:93</code></td></tr>
+    <tr><td>Kafka listener, manual commit</td><td><code>order-service/modules/messaging/consumer.bal:22</code></td></tr>
+    <tr><td>Payment handler (either-order logic)</td><td><code>order-service/modules/messaging/consumer.bal:67</code></td></tr>
+    <tr><td>Restaurant ACK / REJECT handler</td><td><code>order-service/modules/messaging/consumer.bal:92</code></td></tr>
+    <tr><td>Delivery handler (catch-up)</td><td><code>order-service/modules/messaging/consumer.bal:133</code></td></tr>
+    <tr><td>Producer, <code>acks=all</code>, keyed by orderId</td><td><code>order-service/modules/messaging/producer.bal:13</code></td></tr>
+    <tr><td>Indexes</td><td><code>order-service/modules/store/store.bal:31</code></td></tr>
+    <tr><td>Optimistic concurrency</td><td><code>order-service/modules/store/store.bal:77</code></td></tr>
+    <tr><td>49-case transition test</td><td><code>order-service/modules/lifecycle/tests/lifecycle_test.bal</code></td></tr>
+  </table>
+  <div class="say"><b>Closing line:</b> "To sum up: the Order Service is the single owner of the order lifecycle, it enforces a strict state machine, and it moves orders forward purely from events — safely under redelivery, out-of-order arrival and concurrent updates. Thank you — I'm happy to take questions."</div>
+</section>
+</body></html>
